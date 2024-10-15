@@ -1,2 +1,2 @@
 # B_Cell_States
-Data analysis of B cells molecular profiling (transcriptomics + chromatin accessibility) to characterize states and their regulatory drivers. Checking multi-perturbation response using perturb-seq data.
+Gene regulatory control of B cells bifurcating into GC and PB states. Multiome molecular profiling (transcriptomics + chromatin accessibility) to characterize these states and their dynamic gene interactions.
