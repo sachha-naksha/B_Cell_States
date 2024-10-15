@@ -244,7 +244,6 @@ dependencies:
   - llvm-openmp=18.1.8=hf5423f3_1
   - lz4-c=1.9.4=hcb278e6_0
   - lzo=2.10=hd590300_1001
-  - macs2=2.2.7.1=py39hbf8eff0_4
   - make=4.3=hd18ef5c_1
   - mamba=1.5.8=py39hc5d2bb1_0
   - markupsafe=2.1.5=py39hd1e30aa_0
@@ -422,7 +421,10 @@ dependencies:
   - pip:
       - black==24.8.0
       - click==8.1.7
+      - cython==0.29.37
+      - ipdb==0.13.13
       - isort==5.13.2
+      - macs2==2.2.9.1
       - mypy-extensions==1.0.0
       - pathspec==0.12.1
       - pydataverse==0.3.1
