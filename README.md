@@ -3,4 +3,4 @@ Gene regulatory control of B cells bifurcating into GC and PB states. Multiome m
 
 ## Dictys Workflow
 
-![Dictys Workflow](multiome_dictys/dictys_workflow.drawio.png)
+![Dictys Workflow](dictys_workflow.drawio.png)
