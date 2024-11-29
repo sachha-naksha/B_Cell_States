@@ -5,14 +5,14 @@
 #SBATCH -N 1
 #SBATCH -t 1:00:00
 #SBATCH --ntasks-per-node=16
-#SBATCH --array=0-91
+#SBATCH --array=0-55
 
 # Set the working directory to where data is located
 WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs"
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
 # Calculate the subset number based on the job array ID
-SUBSET_NUM=$((SLURM_ARRAY_TASK_ID + 2))
+SUBSET_NUM=$((SLURM_ARRAY_TASK_ID + 1))
 
 # Construct the input and output file paths
 INPUT_RNA="tmp_dynamic/Subset${SUBSET_NUM}/names_rna.txt"
