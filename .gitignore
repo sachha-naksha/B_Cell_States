@@ -1,3 +1,6 @@
 multiome_dynamic_regulation/tutorial_notebooks/
 perturb_seq_gears/
 pseudotime_methods/
+multiome_dynamic_regulation/bash_scripts/*.log
+multiome_dynamic_regulation/bash_scripts/*.out
+multiome_dynamic_regulation/py_scripts/dynamic_grn/debug_subset_cell.py

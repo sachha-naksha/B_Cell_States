@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name="dynamic"
-#SBATCH --output="dictys_dynamic.log"
+#SBATCH --job-name="subset"
+#SBATCH --output="windows_female.log"
 
 #SBATCH -p RM-shared
 #SBATCH -N 1 # by default for gpu-shared you can only request 1 node
@@ -8,7 +8,7 @@
 #SBATCH --ntasks-per-node 32 # how many cards do you want?
 
 # Set the working directory to where data and makefiles are located
-WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs"
+WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_2nd_donor/dictys_outs"
 # Change directory to the working directory
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
@@ -19,10 +19,10 @@ source activate dictys
 mkdir -p tmp_dynamic
 
 # Calculate parameters
-total_cells_in_dataset=24210
+total_cells_in_dataset=35699
 ncell=$(( (${total_cells_in_dataset} * 155 / 1000) / 100 * 100 ))
 noverlap=$(( (${ncell} * 875 / 1000) / 50 * 50 ))
-max_pseudotime_in_traj=0.008
+max_pseudotime_in_traj=0.00463
 dmax=$(awk -v max=$max_pseudotime_in_traj 'BEGIN {
     raw = 0.004 * max;
     scaled = raw * 1000000;

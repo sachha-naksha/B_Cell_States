@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name="gene_by_cell"
-#SBATCH --output="slice.out"
+#SBATCH --output="slice_male_donor.out"
 #SBATCH -p RM-shared
 #SBATCH -N 1
 #SBATCH -t 1:00:00
 #SBATCH --ntasks-per-node=16
-#SBATCH --array=0-55
+#SBATCH --array=0-60
 
 # Set the working directory to where data is located
-WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs"
+WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added"
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
 # Calculate the subset number based on the job array ID
