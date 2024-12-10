@@ -7,7 +7,8 @@
 #SBATCH -t 48:00:00 # Time for the submission script (can be adjusted)
 
 # Set working directory
-WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs"
+WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added"
+SCRIPT_PATH="/ocean/projects/cis240075p/asachan/bio_informatics_analysis/B_Cells_human_analysis/analysis_repo/multiome_dynamic_regulation/py_scripts/dynamic_grn/network_reconstruct_parallel.py"
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
 # Load necessary modules and activate the environment (if required)
@@ -24,8 +25,8 @@ available_nodes=$(get_available_gpu_nodes)
 echo "Available GPU nodes: $available_nodes"
 
 #################################### Define windows and batch size ####################################
-start_window=65
-end_window=93
+start_window=1
+end_window=61
 batch_size=4  # Maximum batch size is 4 windows (1.75 hours per window) (this can change based on available gpu nodes)
 
 #################################### Submit jobs in batches ####################################
@@ -53,13 +54,14 @@ while [ $current_window -le $end_window ]; do
     sbatch --partition=GPU-shared --time="${hours}:${minutes}:00" --output="reconstruct_windows_${current_window}_to_${upper_limit}.log" <<-EOF
 #!/bin/bash
 #SBATCH --job-name="reconstruct_batch_${current_window}_to_${upper_limit}"
-#SBATCH --output="reconstruct_windows_batch_${current_window}_to_${upper_limit}.log"
+#SBATCH --output=/dev/null
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks-per-node=5
 #SBATCH --constraint="v100-32|v100-16"
 #SBATCH --time=${hours}:${minutes}:00
 #SBATCH -N 1
 
+export CUDA_VISIBLE_DEVICES=0
 # Change to working directory
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
@@ -68,7 +70,7 @@ module load anaconda3/2022.10
 source activate dictys
 
 # Run Python script for this batch of windows
-python3 /ocean/projects/cis240075p/asachan/bio_informatics_analysis/B_Cells_human_analysis/analysis_repo/multiome_dictys/py_scripts/network_reconstruct_parallel.py $current_window $upper_limit 1
+python3 $SCRIPT_PATH $current_window $upper_limit 1 $WORK_DIR
 EOF
 
     # Update current window for the next batch

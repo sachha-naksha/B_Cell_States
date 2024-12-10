@@ -5,15 +5,15 @@
 #SBATCH -N 1
 #SBATCH -t 00:30:00
 #SBATCH --ntasks-per-node=128
-#SBATCH --array=0-91
+#SBATCH --array=0-60
 
 # Set working dir
-WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs"
+WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added"
 # change dir to working dir
 cd $WORK_DIR || { echo "Error: couldn't change dir to $WORK_DIR"; exit 1; }
 
 # Calculate the subset number based on the job array ID 
-SUBSET_NUM=$((SLURM_ARRAY_TASK_ID + 2))
+SUBSET_NUM=$((SLURM_ARRAY_TASK_ID + 1))
 
 # I/O
 INPUT_LINKING="tmp_dynamic/Subset${SUBSET_NUM}/linking.tsv.gz"

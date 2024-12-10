@@ -13,13 +13,23 @@ logging.basicConfig(
 )
 
 # Working directory
-WORK_DIR = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs"
+if len(sys.argv) < 5:
+    print("Usage: python script.py start_window end_window num_gpus work_dir")
+    sys.exit(1)
+    
+WORK_DIR = sys.argv[4]
 os.chdir(WORK_DIR)
 
 # Function to get an available GPU
 def get_available_gpu():
     try:
-        # Run nvidia-smi to query GPU status
+        # Check CUDA_VISIBLE_DEVICES environment variable first
+        cuda_devices = os.environ.get('CUDA_VISIBLE_DEVICES')
+        if cuda_devices is not None:
+            # Return the first available GPU from SLURM allocation
+            return 0  # We return 0 because in the SLURM context, this will map to the allocated GPU
+        
+        # Fallback to nvidia-smi only if CUDA_VISIBLE_DEVICES is not set
         result = Popen(["nvidia-smi", "--query-gpu=index,memory.used", "--format=csv,noheader,nounits"], stdout=PIPE)
         output, _ = result.communicate()
         
@@ -86,7 +96,7 @@ def main():
         for subset_num in range(start_subset, end_subset + 1):
             run_reconstruction(subset_num, available_gpu)  # Use the available GPU
     else:
-        # Create a process pool with the specified number of GPUs
+        ###### Create a process pool with the specified number of GPUs (not possible to find more than 1 gpu per node, hence this part is not used)
         pool = multiprocessing.Pool(num_gpus)
 
         # Assign each subset to a GPU in a round-robin fashion
