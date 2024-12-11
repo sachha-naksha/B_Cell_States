@@ -7,7 +7,7 @@
 #SBATCH -t 1:00:00         
 
 # Set working directory
-WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs"
+WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added"
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
 # Load necessary modules and activate the environment
@@ -19,7 +19,7 @@ LOG_FILE="$SLURM_SUBMIT_DIR/normalize_log.log"
 
 #################################### Define windows and batch size ####################################
 start_window=1
-end_window=93
+end_window=61
 batch_size=4  # Maximum batch size is 4 windows (can change based on requirements)
 
 #################################### Submit jobs in batches ####################################

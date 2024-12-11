@@ -61,7 +61,6 @@ while [ $current_window -le $end_window ]; do
 #SBATCH --time=${hours}:${minutes}:00
 #SBATCH -N 1
 
-export CUDA_VISIBLE_DEVICES=0
 # Change to working directory
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
@@ -70,7 +69,7 @@ module load anaconda3/2022.10
 source activate dictys
 
 # Run Python script for this batch of windows
-python3 $SCRIPT_PATH $current_window $upper_limit 1 $WORK_DIR
+python3 $SCRIPT_PATH $current_window $upper_limit $WORK_DIR
 EOF
 
     # Update current window for the next batch

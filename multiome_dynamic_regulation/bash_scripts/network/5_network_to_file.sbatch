@@ -7,7 +7,7 @@
 #SBATCH -t 6:00:00  # Adjust time as needed
 
 # Set the working directory
-WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs"
+WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added"
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
 # Ensure the output directory exists

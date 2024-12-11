@@ -5,7 +5,7 @@
 #SBATCH -N 1 # number of nodes
 #SBATCH --ntasks-per-node=128 # number of cores per node; memory is 2gb per node for rm-shared
 #SBATCH -t 6:00:00
-#SBATCH --array=0-2 # Array with three jobs (0, 1, 2)
+#SBATCH --array=0-2 # Array with number of jobs = number of days (0, 1, 2)
 
 module load anaconda3/2022.10
 
