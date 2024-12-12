@@ -3,12 +3,12 @@
 #SBATCH --output="footprint_windows.out"
 #SBATCH -p RM-shared
 #SBATCH -N 1
-#SBATCH -t 1:00:00 # wall-time
+#SBATCH -t 00:30:00 # wall-time
 #SBATCH --ntasks-per-node=32
-#SBATCH --array=0-60
+#SBATCH --array=0-52
 
 # Set the working directory to where data and makefiles are located
-WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added"
+WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/tut_files/skin"
 # Change directory to the working directory
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 

@@ -7,7 +7,7 @@
 #SBATCH -t 48:00:00 # Time for the submission script (can be adjusted)
 
 # Set working directory
-WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added"
+WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/tut_files/skin"
 SCRIPT_PATH="/ocean/projects/cis240075p/asachan/bio_informatics_analysis/B_Cells_human_analysis/analysis_repo/multiome_dynamic_regulation/py_scripts/dynamic_grn/network_reconstruct_parallel.py"
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
@@ -26,7 +26,7 @@ echo "Available GPU nodes: $available_nodes"
 
 #################################### Define windows and batch size ####################################
 start_window=1
-end_window=61
+end_window=53
 batch_size=4  # Maximum batch size is 4 windows (1.75 hours per window) (this can change based on available gpu nodes)
 
 #################################### Submit jobs in batches ####################################

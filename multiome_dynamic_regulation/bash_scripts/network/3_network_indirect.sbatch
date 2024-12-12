@@ -5,10 +5,10 @@
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=32
 #SBATCH -t 1:00:00  # 30 mins for each subset
-#SBATCH --array=1-61  # Create job array from Subset1 to Subset93
+#SBATCH --array=0-52  # Create job array for all subsets
 
 # Set the working directory
-WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added"
+WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/tut_files/skin"
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
 # Load necessary modules and activate the environment
@@ -16,7 +16,7 @@ module load anaconda3/2022.10
 source activate dictys
 
 # Calculate the window number based on the array task ID
-SUBSET_NUM=$((SLURM_ARRAY_TASK_ID))
+SUBSET_NUM=$((SLURM_ARRAY_TASK_ID + 1))
 
 # Combined log file for all indirect effect and normalization jobs
 LOG_FILE="$SLURM_SUBMIT_DIR/indirect_combined.log"

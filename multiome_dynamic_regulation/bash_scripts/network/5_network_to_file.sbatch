@@ -4,10 +4,10 @@
 #SBATCH -p RM
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=128
-#SBATCH -t 6:00:00  # Adjust time as needed
+#SBATCH -t 3:00:00  # Adjust time as needed
 
 # Set the working directory
-WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added"
+WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/tut_files/skin"
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
 # Ensure the output directory exists
