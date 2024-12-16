@@ -79,7 +79,72 @@ def plot_log_cpm_tfs(dictys_dynamic_object, gene_indices, window_indices, tf_lis
     plt.ylabel('log(CPM) of TFs')
     plt.title(f'log(CPM) of TFs for {branch_name} Branch')
     plt.legend(title='Transcription Factors')
-    plt.show()  # Display the plot in the notebook
+    plt.show()  
+
+def calculate_and_plot_expression_gradients(dictys_dynamic_object, gene_indices, window_indices, tf_list, branch_name):
+    """
+    Calculate and plot the gradients (rate of change) of log(CPM) values for transcription factors.
+    
+    Parameters:
+    -----------
+    dictys_dynamic_object : dictys object
+        The dynamic network object containing expression data
+    gene_indices : list
+        Indices of genes to analyze
+    window_indices : list
+        Indices of windows to analyze
+    tf_list : list
+        List of TF names
+    branch_name : str
+        Name of the branch for plotting
+        
+    Returns:
+    --------
+    dict
+        Dictionary mapping TF names to their corresponding gradients across pseudotime
+    """
+    # Get expression values and pseudotime
+    cpm_values = dictys_dynamic_object.prop['ns']['cpm'][np.ix_(gene_indices, window_indices)]
+    log_cpm_values = np.log(cpm_values)
+    branch_pseudotime = get_pseudotime_of_windows(dictys_dynamic_object, window_indices)
+    
+    # Calculate gradients for each TF
+    gradients_dict = {}
+    
+    plt.figure(figsize=(10, 6))
+    
+    for i, tf_name in enumerate(tf_list):
+        # Calculate gradients using numpy
+        gradients = np.gradient(log_cpm_values[i, :], branch_pseudotime)
+        gradients_dict[tf_name] = gradients
+        
+        # Plot gradients
+        plt.plot(branch_pseudotime, gradients, label=tf_name)
+    
+    # Configure plot
+    plt.xlabel('Pseudotime')
+    plt.ylabel('Rate of Change (d/dt log(CPM))')
+    plt.title(f'Expression Rate of Change - {branch_name} Branch')
+    plt.legend(title='Transcription Factors')
+    plt.axhline(y=0, color='k', linestyle='--', alpha=0.3)  # Add zero line for reference
+    plt.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # # Print summary statistics
+    # print("\nGradient Summary Statistics:")
+    # print("-" * 50)
+    # for tf_name in tf_list:
+    #     gradients = gradients_dict[tf_name]
+    #     print(f"\n{tf_name}:")
+    #     print(f"  Mean gradient: {np.mean(gradients):.4f}")
+    #     print(f"  Max gradient: {np.max(gradients):.4f}")
+    #     print(f"  Min gradient: {np.min(gradients):.4f}")
+    #     print(f"  Std deviation: {np.std(gradients):.4f}")
+    
+    return gradients_dict
+
 
 def plot_node_degree(dictys_dynamic_object, non_zero_weights_per_tf, window_indices, tf_list, branch_name):
     """
@@ -93,7 +158,7 @@ def plot_node_degree(dictys_dynamic_object, non_zero_weights_per_tf, window_indi
     plt.ylabel('Node Degree of TFs')
     plt.title(f'Node Degree of TFs for {branch_name} Branch')
     plt.legend(title='Transcription Factors')
-    plt.show()  # Display the plot in the notebook
+    plt.show()  
 
 def plot_regulation_heatmap(weights, tf_list, branch_name, global_vmin, global_vmax):
     """
@@ -124,10 +189,9 @@ def plot_regulation_heatmap(weights, tf_list, branch_name, global_vmin, global_v
 
 if __name__ == "__main__":
     ###### CONFIG ######
-    data_file = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added/output/dynamic.h5'
-    output_folder_grns = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added/output/networks'
-    output_folder_plots = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added/output/figures'
-    tf_list = ['IRF4', 'IRF8', 'PRDM1', 'BCL6', 'BATF', 'SPIB']
+    data_file = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/tut_files/skin/output/dynamic.h5'
+    output_folder = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/tut_files/skin/output'
+    tf_list = ['IRF4', 'PRDM1', 'BACH2', 'BATF']
     pb_window_indices = list(range(30, 46)) + [2]
     abc_window_indices = [1] + list(range(4, 30)) + [0]
     gc_window_indices = list(range(46, 61)) + [3]
