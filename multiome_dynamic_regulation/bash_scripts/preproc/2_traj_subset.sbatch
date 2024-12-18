@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name="subset"
-#SBATCH --output="windows_mouse.log"
+#SBATCH --output="windows_male.log"
 
 #SBATCH -p RM-shared
 #SBATCH -N 1 # by default for gpu-shared you can only request 1 node
@@ -19,10 +19,10 @@ source activate dictys
 mkdir -p tmp_dynamic
 
 # Calculate parameters
-total_cells_in_dataset=6436
+total_cells_in_dataset=28494
 ncell=$(( (${total_cells_in_dataset} * 155 / 1000) / 100 * 100 ))
 noverlap=$(( (${ncell} * 875 / 1000) / 50 * 50 ))
-max_pseudotime_in_traj=12.76
+max_pseudotime_in_traj=0.0068
 dmax=$(awk -v max=$max_pseudotime_in_traj 'BEGIN {
     raw = 0.004 * max;
     scaled = raw * 1000000;
