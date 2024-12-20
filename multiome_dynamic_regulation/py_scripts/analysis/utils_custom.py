@@ -3,43 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import os
 
-######################### Data loading functions #########################
-
-def check_tf_presence(dictys_dynamic_object, tf_list):
-    """
-    Check if the TFs are present in the dynamic network object.
-    """
-    gene_hashmap = dictys_dynamic_object.ndict
-    tf_mappings_to_gene_hashmap = dictys_dynamic_object.nids[0]
-    
-    tfs_present_in_dynamic_object = []
-    for tf in tf_list:
-        # Check if the TF is in the gene_hashmap
-        if tf in gene_hashmap:
-            gene_index = gene_hashmap[tf]
-            # Check if the gene index is present in tf_mappings_to_gene_hashmap
-            if np.any(tf_mappings_to_gene_hashmap == gene_index):
-                tfs_present_in_dynamic_object.append(tf)
-    
-    return tfs_present_in_dynamic_object
-    
-def check_gene_presence(dictys_dynamic_object, gene_list):
-    """
-    Check if the genes are present as targets in the dynamic network object.
-    """
-    gene_hashmap = dictys_dynamic_object.ndict
-    target_mappings_to_hashmap = dictys_dynamic_object.nids[1]
-    
-    target_genes_present_in_dynamic_object = []
-    for gene in gene_list:
-        # Check if the gene is in the gene_hashmap
-        if gene in gene_hashmap:
-            gene_index = gene_hashmap[gene]
-            # Check if the gene index is present in target_mappings_to_hashmap
-            if np.any(target_mappings_to_hashmap == gene_index):
-                target_genes_present_in_dynamic_object.append(gene)
-    
-    return target_genes_present_in_dynamic_object
+######################### Data retrieval #########################
 
 def get_tf_indices(dictys_dynamic_object, tf_list):
     """
@@ -111,56 +75,40 @@ def get_indirect_weights_across_windows(dictys_dynamic_object, tf_indices, windo
 
 ##################################### Utils ############################################
 
-################################ Plotting functions ####################################
-
-def plot_log_cpm_tfs(dictys_dynamic_object, gene_indices, window_indices, tf_list, branch_name):
+def check_tf_presence(dictys_dynamic_object, tf_list):
     """
-    Plot the log CPM of transcription factors (TFs) as a function of pseudo-time and display the plot in the notebook.
+    Check if the TFs are present in the dynamic network object.
     """
-    cpm_values = dictys_dynamic_object.prop['ns']['cpm'][np.ix_(gene_indices, window_indices)]
-    log_cpm_values = np.log(cpm_values)
-    branch_pseudotime = get_pseudotime_of_windows(dictys_dynamic_object, window_indices)
-    plt.figure(figsize=(10, 6))
-    for i, tf_name in enumerate(tf_list):
-        plt.plot(branch_pseudotime, log_cpm_values[i, :], label=tf_name)  # i corresponds to each TF
-    plt.xlabel('Pseudotime')
-    plt.ylabel('log(CPM) of TFs')
-    plt.title(f'log(CPM) of TFs for {branch_name} Branch')
-    plt.legend(title='Transcription Factors')
-    plt.show()  
-
-def plot_node_degree(dictys_dynamic_object, non_zero_weights_per_tf, window_indices, tf_list, branch_name):
-    """
-    Plot the node degree of TFs as a function of pseudo-time.
-    """
-    branch_pseudotime = get_pseudotime_of_windows(dictys_dynamic_object, window_indices)
-    plt.figure(figsize=(10, 6))
-    for i, tf_name in enumerate(tf_list):
-        plt.plot(branch_pseudotime, non_zero_weights_per_tf[i, :], label=tf_name)  # i corresponds to each TF
-    plt.xlabel('Pseudotime')
-    plt.ylabel('Node Degree of TFs')
-    plt.title(f'Node Degree of TFs for {branch_name} Branch')
-    plt.legend(title='Transcription Factors')
-    plt.show()  
-
-
-if __name__ == "__main__":
-    ###### CONFIG ######
-    data_file = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/tut_files/skin/output/dynamic.h5'
-    output_folder = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/tut_files/skin/output'
-    tf_list = ['IRF4', 'PRDM1', 'BACH2', 'BATF']
-    pb_window_indices = list(range(30, 46)) + [2]
-    abc_window_indices = [1] + list(range(4, 30)) + [0]
-    gc_window_indices = list(range(46, 61)) + [3]
+    gene_hashmap = dictys_dynamic_object.ndict
+    tf_mappings_to_gene_hashmap = dictys_dynamic_object.nids[0]
     
-    ###### RUN ######
-    dictys_dynamic_object = load_data(data_file)
-    # Get the TF indices
-    tf_indices, gene_indices = get_tf_indices(dictys_dynamic_object, tf_list)
-    print(f"TF indices: {tf_indices}")
-    print(f"Gene indices: {gene_indices}")
-    # # get networkweights across PB windows
-    # all_target_weights_pb = get_weights_across_windows(dictys_dynamic_object, tf_indices, pb_window_indices)
-    # print(f"All target weights across PB windows: {all_target_weights_pb}")
+    tfs_present_in_dynamic_object = []
+    for tf in tf_list:
+        # Check if the TF is in the gene_hashmap
+        if tf in gene_hashmap:
+            gene_index = gene_hashmap[tf]
+            # Check if the gene index is present in tf_mappings_to_gene_hashmap
+            if np.any(tf_mappings_to_gene_hashmap == gene_index):
+                tfs_present_in_dynamic_object.append(tf)
+    
+    return tfs_present_in_dynamic_object
+    
+def check_gene_presence(dictys_dynamic_object, gene_list):
+    """
+    Check if the genes are present as targets in the dynamic network object.
+    """
+    gene_hashmap = dictys_dynamic_object.ndict
+    target_mappings_to_hashmap = dictys_dynamic_object.nids[1]
+    
+    target_genes_present_in_dynamic_object = []
+    for gene in gene_list:
+        # Check if the gene is in the gene_hashmap
+        if gene in gene_hashmap:
+            gene_index = gene_hashmap[gene]
+            # Check if the gene index is present in target_mappings_to_hashmap
+            if np.any(target_mappings_to_hashmap == gene_index):
+                target_genes_present_in_dynamic_object.append(gene)
+    
+    return target_genes_present_in_dynamic_object
 
     
