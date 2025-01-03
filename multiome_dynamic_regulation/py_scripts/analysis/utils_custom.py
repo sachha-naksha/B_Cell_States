@@ -170,9 +170,10 @@ def fig_regulation_heatmap(
     # sample equispaced points between start and stop nodes
     pts, fsmooth = network.linspace(start, stop, num, dist)
     stat1_net = fsmooth(stat.net(network))
-    # Get pseudotime
+    # Get pseudotime (pts mapped to start node index so that pseudotime 0 is the start node)
     stat1_x = stat.pseudotime(network, pts)
-    dx = pd.Series(stat1_x.compute(pts)[0])
+    tmp=stat1_x.compute(pts)[0]
+    dx = pd.Series(tmp)
     # Test regulation existence
     tdict = [dict(zip(x, range(len(x)))) for x in stat1_net.names]
     t1 = [[x[y] for x in regulations if x[y] not in tdict[y]] for y in range(2)]
@@ -245,6 +246,7 @@ def compute_chars(
     Compute curve characteristics for one branch.
     """
     pts, fsmooth = self.linspace(start, stop, num, dist)
+    tmp_pt_0 = pts[[1]]
     if mode == "regulation":
         # Log number of targets
         stat1_net = fsmooth(stat.net(self))
@@ -256,8 +258,10 @@ def compute_chars(
         raise ValueError(f"Unknown mode {mode}.")
     # Pseudo time
     stat1_x = stat.pseudotime(self, pts)
-    dy = pd.DataFrame(stat1_y.compute(pts), index=stat1_y.names[0])
-    dx = pd.Series(stat1_x.compute(pts)[0])
+    tmp_y = stat1_y.compute(pts)
+    tmp_x = stat1_x.compute(pts)
+    dy = pd.DataFrame(tmp_y, index=stat1_y.names[0])
+    dx = pd.Series(tmp_x[0]) #first gene's pseudotime is taken as all genes have the same pseudotime
     return dy, dx
 
 
@@ -298,3 +302,23 @@ if __name__ == "__main__":
     dynamic_object_path = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added/output/dynamic.h5"
     dynamic_object = load_dynamic_object(dynamic_object_path)
     print("data loaded")
+    # #plot the regulation heatmap for the PB branch
+    # fig_pb, ax_pb, cmap_pb = fig_regulation_heatmap(
+    #     network=dynamic_object,
+    #     start=1,  # start node
+    #     stop=2,  # end node
+    #     regulations=[('BACH2', 'JCHAIN'), ('BACH2', 'MZB1')],
+    #     num=100,
+    #     dist=0.0005,
+    #     ax=None,
+    #     cmap='coolwarm'
+    # )
+    dy, dx = compute_chars(dynamic_object,
+    start=1,          # Starting node ID
+    stop=2,           # Ending node ID
+    num=50,          # Number of points to interpolate
+    dist=0.0005,      # dist between sampled points
+    mode='expression' # Use expression (CPM) mode
+    )
+    print(dy)
+    print(dx)
