@@ -54,6 +54,14 @@ def get_target_gene_indices(dictys_dynamic_object, target_list):
             target_indices.append(gene_hashmap[gene])
     return target_indices
 
+def get_all_target_names(dictys_dynamic_object):
+    """
+    Get all possible target gene names from the dynamic object's ndict
+    """
+    # Get all gene names from ndict
+    target_names = list(dictys_dynamic_object.ndict.keys())
+    target_names.sort()  # Sort for consistency
+    return target_names
 
 def get_pseudotime_of_windows(dictys_dynamic_object, window_indices):
     """
@@ -315,6 +323,105 @@ def fig_regulation_heatmap_clustered(
     # Perform clustering on rows if requested
     if cluster_rows:
         dnet, regulations, _ = cluster_regulations_by_extremum(dnet, regulations, use_max=use_max)
+    
+    # Create figure and axes
+    if ax is None:
+        figsize = (figsize[0], figsize[1] * dnet.shape[0])
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111)
+    else:
+        if figsize is not None:
+            raise ValueError("figsize should not be set if ax is set.")
+        fig = ax.get_figure()
+        figsize = fig.get_size_inches()
+    
+    aspect = (figsize[1] / dnet.shape[0]) / (figsize[0] / dnet.shape[1])
+    
+    # Determine and apply colormap
+    if isinstance(cmap, str):
+        if vmax is None:
+            vmax = np.quantile(np.abs(dnet).ravel(), 0.95)
+        cmap = matplotlib.cm.ScalarMappable(
+            norm=matplotlib.colors.Normalize(vmin=-vmax, vmax=vmax), 
+            cmap=cmap
+        )
+    elif vmax is not None:
+        raise ValueError("vmax should not be set if cmap is a matplotlib.cm.ScalarMappable.")
+    
+    if hasattr(cmap, "to_rgba"):
+        im = ax.imshow(cmap.to_rgba(dnet), aspect=aspect, interpolation='none')
+    else:
+        im = ax.imshow(dnet, aspect=aspect, interpolation='none', cmap=cmap)
+        plt.colorbar(im, label="Regulation strength")
+    
+    # Set pseudotime labels as x axis labels
+    ax.set_xlabel("Pseudotime")
+    num_ticks = 10
+    tick_positions = np.linspace(0, dnet.shape[1] - 1, num_ticks, dtype=int)
+    tick_labels = dx.iloc[tick_positions]
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels([f"{x:.6f}" for x in tick_labels], rotation=45, ha="right")
+    
+    # Set regulation pair labels
+    ax.set_yticks(list(range(len(regulations))))
+    ax.set_yticklabels(["-".join(x) for x in regulations])
+    
+    # Add grid lines to separate rows
+    ax.set_yticks(np.arange(dnet.shape[0] + 1) - 0.5, minor=True)
+    ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
+    
+    return fig, ax, cmap
+
+def fig_regulation_heatmap(
+    network: dictys.net.dynamic_network,
+    start: int,
+    stop: int,
+    regulations: list[Tuple[str, str]],
+    num: int = 100,
+    dist: float = 1.5,
+    ax: Optional[matplotlib.axes.Axes] = None,
+    cmap: Union[str, matplotlib.cm.ScalarMappable] = "coolwarm",
+    figsize: Tuple[float, float] = (2, 0.15),
+    vmax: Optional[float] = None
+) -> Tuple[matplotlib.pyplot.Figure, matplotlib.axes.Axes, matplotlib.cm.ScalarMappable]:
+    """
+    Draws pseudo-time dependent heatmap of regulation strengths without clustering.
+    Maintains the original order of regulation pairs as provided in the input list.
+    
+    Args:
+        network: dictys dynamic network object
+        start: start window index
+        stop: stop window index
+        regulations: list of (tf, target) tuples
+        num: number of interpolation points
+        dist: smoothing distance parameter
+        ax: optional matplotlib axes for plotting
+        cmap: colormap for heatmap
+        figsize: figure size (width, height per row)
+        vmax: optional maximum value for colormap scaling
+    
+    Returns:
+        tuple of (figure, axes, colormap)
+    """
+    # Get dynamic network edge strength
+    pts, fsmooth = network.linspace(start, stop, num, dist)
+    stat1_net = fsmooth(stat.net(network))
+    stat1_x = stat.pseudotime(network, pts)
+    tmp = stat1_x.compute(pts)[0]
+    dx = pd.Series(tmp)
+    
+    # Test regulation existence and extract regulations
+    tdict = [dict(zip(x, range(len(x)))) for x in stat1_net.names]
+    t1 = [[x[y] for x in regulations if x[y] not in tdict[y]] for y in range(2)]
+    if len(t1[0]) > 0:
+        raise ValueError("Regulator gene(s) {} not found in network.".format("/".join(t1[0])))
+    if len(t1[1]) > 0:
+        raise ValueError("Target gene(s) {} not found in network.".format("/".join(t1[1])))
+    
+    # Extract regulations to draw
+    dnet = stat1_net.compute(pts)
+    t1 = np.array([[tdict[0][x[0]], tdict[1][x[1]]] for x in regulations]).T
+    dnet = dnet[t1[0], t1[1]]
     
     # Create figure and axes
     if ax is None:
