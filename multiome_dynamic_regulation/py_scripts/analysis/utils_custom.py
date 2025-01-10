@@ -348,7 +348,7 @@ def fig_regulation_heatmap_clustered(
     use_max: bool = True  # New parameter
 ) -> Tuple[matplotlib.pyplot.Figure, matplotlib.axes.Axes, matplotlib.cm.ScalarMappable]:
     """
-    Draws hierarchically clustered pseudo-time dependent heatmap of regulation strengths.
+    Draws clustered pseudo-time dependent heatmap of regulation strengths.
     """
     #ipdb.set_trace()
     # Get dynamic network edge strength
