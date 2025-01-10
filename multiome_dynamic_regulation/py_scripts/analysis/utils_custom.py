@@ -75,21 +75,38 @@ def get_pseudotime_of_windows(dictys_dynamic_object, window_indices):
     ]
     return branch_pseudotime
 
-
-def get_grn_weights_across_windows(dictys_dynamic_object, tf_indices, window_indices):
+def get_grn_weights_across_windows(dictys_dynamic_object, tf_indices=None, gene_indices=None, window_indices=None):
     """
-    Get the weights of TFs over specific windows for x-axis in plots
+    Get the weights matrix for both specified TFs and TFs regulating specified targets
     """
-    # Get the actual size of the second dimension
-    array_shape = dictys_dynamic_object.prop["es"]["w_n"].shape
-    n_targets = array_shape[1]
+    # Get the weights array
+    weights = dictys_dynamic_object.prop["es"]["w_n"]  
+    # Convert indices to lists if they're not already
+    tf_indices = list(tf_indices) if tf_indices is not None else []
+    gene_indices = list(gene_indices) if gene_indices is not None else []
+    # Get all TF indices that regulate the specified target genes
+    if gene_indices:
+        # weights shape is (n_tfs, n_genes, n_windows)
+        tf_mask = np.any(np.any(weights[:, gene_indices, :] != 0, axis=2), axis=1) #shape (n_tfs,)
+        regulating_tf_indices = np.where(tf_mask)[0]
+        # Combine with specified TF indices, removing duplicates while preserving order
+        all_tf_indices = list(dict.fromkeys(tf_indices + list(regulating_tf_indices)))
+    else:
+        all_tf_indices = tf_indices
 
-    # Access the 3-D array of weights using the correct dimension
-    grn_weights_of_tfs = dictys_dynamic_object.prop["es"]["w_n"][
-        np.ix_(tf_indices, range(n_targets), window_indices)
-    ]
-    return grn_weights_of_tfs
+    # Get all gene indices that are regulated by the specified TFs
+    if tf_indices:
+        gene_mask = np.any(np.any(weights[tf_indices, :, :] != 0, axis=2), axis=0) #shape (n_genes,)
+        regulated_gene_indices = np.where(gene_mask)[0]
+        
+        # Combine with specified gene indices, removing duplicates while preserving order
+        all_gene_indices = list(dict.fromkeys(gene_indices + list(regulated_gene_indices)))
+    else:
+        all_gene_indices = gene_indices
 
+    # Extract the combined weights matrix using the computed indices
+    combined_weights = weights[np.ix_(all_tf_indices, all_gene_indices, window_indices)]
+    return combined_weights, all_tf_indices, all_gene_indices
 
 def get_weights_for_tf_target_pairs(
     dictys_dynamic_object, tf_indices, target_indices, window_indices
@@ -102,7 +119,6 @@ def get_weights_for_tf_target_pairs(
         np.ix_(tf_indices, target_indices, window_indices)
     ]
     return weights_of_tf_target
-
 
 def get_indirect_weights_across_windows(
     dictys_dynamic_object, tf_indices, window_indices
@@ -121,15 +137,12 @@ def get_indirect_weights_across_windows(
 
 ##################################### Utils ############################################
 
-def get_state_labels_in_window(cell_assignment_matrix, cell_labels):
+def get_state_labels_in_window(dictys_dynamic_object, cell_labels):
     """
     Creates a mapping of window indices to their constituent cells' labels
-    Args:
-        cell_assignment_matrix: numpy array of shape (n_windows, n_cells)
-        cell_labels: list of cell labels for each cell
-    Returns:
-        dict: {window_index: list_of_cell_labels}
     """
+    # get cell assignment matrix from dictys_dynamic_object.prop['sc']['w']
+    cell_assignment_matrix = dictys_dynamic_object.prop['sc']['w']
     state_labels_in_window = {}
     for window_idx in range(cell_assignment_matrix.shape[0]):
         indices_of_cells_present_in_window = np.where(cell_assignment_matrix[window_idx] == 1)[0]
@@ -137,42 +150,38 @@ def get_state_labels_in_window(cell_assignment_matrix, cell_labels):
     return state_labels_in_window
 
 def get_state_total_counts(cell_labels):
-    """Get total number of cells for each state in the dataset"""
+    """
+    Get total number of cells for each state in the dataset
+    """
     state_counts = {}
     for label in cell_labels:
         state_counts[label] = state_counts.get(label, 0) + 1
     return state_counts
 
-def get_top_k_fraction_labels(window_labels, state_total_counts, k=2):
+def get_top_k_fraction_labels(dictys_dynamic_object, window_idx, cell_labels, k=2):
     """
-    Returns the k labels with both fractions:
-    1. window_composition = state_count_in_window / total_cells_in_window
-    2. state_distribution = state_count_in_window / total_state_count
-    
-    Args:
-        window_labels: list of cell labels in the window
-        state_total_counts: dict of total cells per state in dataset
-        k: number of top labels to return
-    Returns:
-        list of tuples: [(label, window_composition, state_distribution), ...]
+    Returns the k labels with both fractions for a given window
     """
+    # Get state labels for all windows
+    state_labels_dict = get_state_labels_in_window(dictys_dynamic_object, cell_labels)
+    # Get window labels for specified window
+    window_labels = state_labels_dict[window_idx]
+    # Get total counts across all states
+    state_total_counts = get_state_total_counts(cell_labels)
     # Count cells per state in this window
     window_counts = {}
     for label in window_labels:
         window_counts[label] = window_counts.get(label, 0) + 1
-    
     total_cells_in_window = len(window_labels)
-    
     # Calculate both fractions for each state
     state_metrics = {}
     for state in window_counts:
-        window_composition = window_counts[state] / total_cells_in_window  # how much of the window is this state
-        state_distribution = window_counts[state] / state_total_counts[state]  # how much of the state is in this window
+        window_composition = window_counts[state] / total_cells_in_window
+        state_distribution = window_counts[state] / state_total_counts[state]
         state_metrics[state] = (window_composition, state_distribution)
-    
-    # Sort primarily by window_composition, then by state_distribution
-    sorted_states = sorted(state_metrics.items(), 
-                         key=lambda x: (x[1][0], x[1][1]), 
+    # Sort primarily by state_distribution, then by window_composition
+    sorted_states = sorted(state_metrics.items(),
+                         key=lambda x: (x[1][1], x[1][0]),
                          reverse=True)
     return sorted_states[:k]
 
@@ -193,7 +202,6 @@ def check_tf_presence(dictys_dynamic_object, tf_list):
                 tfs_present_in_dynamic_object.append(tf)
 
     return tfs_present_in_dynamic_object
-
 
 def check_gene_presence(dictys_dynamic_object, gene_list):
     """
@@ -216,16 +224,6 @@ def check_gene_presence(dictys_dynamic_object, gene_list):
 def cluster_regulations(dnet, regulations, method='ward'):
     """
     Perform hierarchical clustering on regulation data.
-    
-    Args:
-        dnet: numpy array of regulation strengths (n_regulations x n_timepoints)
-        regulations: list of (tf, target) tuples
-        method: clustering method to use (default: 'ward')
-        
-    Returns:
-        dnet_clustered: reordered regulation strength matrix
-        regulations_clustered: reordered regulation pairs
-        row_linkage: linkage matrix from clustering
     """
     from scipy.cluster.hierarchy import linkage, dendrogram
     
@@ -248,16 +246,6 @@ def cluster_regulations(dnet, regulations, method='ward'):
 def cluster_regulations_by_extremum(dnet, regulations, use_max=True):
     """
     Sort regulations based on when their extremum occurs in pseudotime.
-    
-    Args:
-        dnet: numpy array of regulation strengths (n_regulations x n_timepoints)
-        regulations: list of (tf, target) tuples
-        use_max: if True, use maximum absolute value; if False, use minimum
-        
-    Returns:
-        dnet_sorted: reordered regulation strength matrix
-        regulations_sorted: reordered regulation pairs
-        None: for compatibility with original function
     """
     # Only sort if we have multiple rows
     if dnet.shape[0] <= 1:
@@ -281,6 +269,69 @@ def cluster_regulations_by_extremum(dnet, regulations, use_max=True):
     regulations_sorted = [regulations[i] for i in row_order]
     
     return dnet_sorted, regulations_sorted, None
+
+def create_tf_target_pairs(dictys_dynamic_object, tf_pairs_df):
+    """
+    Create a list of TF-Target tuples from combinatorial control data,
+    checking presence of both TFs and targets in the dynamic object.
+    """
+    tf_target_pairs = []
+
+    for _, row in tf_pairs_df.iterrows():
+        # Get TF pair and targets
+        tf1, tf2 = eval(row["TF"])
+        common_targets = eval(row["common"])
+
+        # Check if TFs are present in dynamic object
+        present_tfs = check_tf_presence(dictys_dynamic_object, [tf1, tf2])
+
+        # Check if targets are present in dynamic object
+        present_targets = check_gene_presence(dictys_dynamic_object, common_targets)
+
+        # Create pairs for present TFs and targets
+        for tf in present_tfs:
+            for target in present_targets:
+                tf_target_pairs.append((tf, target))
+
+    # Remove any duplicates
+    tf_target_pairs = list(set(tf_target_pairs))
+
+    print(f"Created {len(tf_target_pairs)} unique TF-target pairs")
+    return tf_target_pairs
+
+def compute_chars(
+    self,
+    start: int,
+    stop: int,
+    num: int = 100,
+    dist: float = 1.5,
+    mode: str = "regulation",
+    sparsity: float = 0.01,
+) -> pd.DataFrame:
+    """
+    Compute curve characteristics for one branch.
+    """
+    pts, fsmooth = self.linspace(start, stop, num, dist)
+    tmp_pt_0 = pts[[1]]
+    if mode == "regulation":
+        # Log number of targets
+        stat1_net = fsmooth(stat.net(self))
+        stat1_netbin = stat.fbinarize(stat1_net, sparsity=sparsity)
+        stat1_y = stat.flnneighbor(stat1_netbin)
+    elif mode == "expression":
+        stat1_y = fsmooth(stat.lcpm(self, cut=0))
+    else:
+        raise ValueError(f"Unknown mode {mode}.")
+    # Pseudo time
+    stat1_x = stat.pseudotime(self, pts)
+    tmp_y = stat1_y.compute(pts)
+    tmp_x = stat1_x.compute(pts)
+    dy = pd.DataFrame(tmp_y, index=stat1_y.names[0])
+    dx = pd.Series(tmp_x[0]) #first gene's pseudotime is taken as all genes have the same pseudotime
+    return dy, dx
+
+
+##################################### Plotting ############################################
 
 def fig_regulation_heatmap_clustered(
     network: dictys.net.dynamic_network,
@@ -387,21 +438,6 @@ def fig_regulation_heatmap(
     """
     Draws pseudo-time dependent heatmap of regulation strengths without clustering.
     Maintains the original order of regulation pairs as provided in the input list.
-    
-    Args:
-        network: dictys dynamic network object
-        start: start window index
-        stop: stop window index
-        regulations: list of (tf, target) tuples
-        num: number of interpolation points
-        dist: smoothing distance parameter
-        ax: optional matplotlib axes for plotting
-        cmap: colormap for heatmap
-        figsize: figure size (width, height per row)
-        vmax: optional maximum value for colormap scaling
-    
-    Returns:
-        tuple of (figure, axes, colormap)
     """
     # Get dynamic network edge strength
     pts, fsmooth = network.linspace(start, stop, num, dist)
@@ -471,81 +507,92 @@ def fig_regulation_heatmap(
     
     return fig, ax, cmap
 
-def compute_chars(
-    self,
+def fig_expression_gradient_heatmap(
+    network: dictys.net.dynamic_network,
     start: int,
     stop: int,
+    genes_or_regulations: Union[list[str], list[Tuple[str, str]]],
     num: int = 100,
     dist: float = 1.5,
-    mode: str = "regulation",
-    sparsity: float = 0.01,
-) -> pd.DataFrame:
+    ax: Optional[matplotlib.axes.Axes] = None,
+    cmap: Union[str, matplotlib.cm.ScalarMappable] = "coolwarm",
+    figsize: Tuple[float, float] = (2, 0.15)
+) -> Tuple[matplotlib.pyplot.Figure, matplotlib.axes.Axes, matplotlib.cm.ScalarMappable]:
     """
-    Compute curve characteristics for one branch.
+    Draws pseudo-time dependent heatmap of expression gradients.
+    
+    Args:
+        network: Dynamic network object
+        start, stop: Start and stop points in pseudotime
+        genes_or_regulations: Either a list of gene names or a list of (tf, target) tuples
+        num: Number of points to evaluate
+        dist: Distance parameter for smoothing
+        ax: Optional matplotlib axes
+        cmap: Colormap for heatmap
+        figsize: Base figure size (width, height per row)
     """
-    pts, fsmooth = self.linspace(start, stop, num, dist)
-    tmp_pt_0 = pts[[1]]
-    if mode == "regulation":
-        # Log number of targets
-        stat1_net = fsmooth(stat.net(self))
-        stat1_netbin = stat.fbinarize(stat1_net, sparsity=sparsity)
-        stat1_y = stat.flnneighbor(stat1_netbin)
-    elif mode == "expression":
-        stat1_y = fsmooth(stat.lcpm(self, cut=0))
+    # Get expression data
+    dy, dx = compute_chars(network, start, stop, num, dist, mode='expression')
+    
+    # Determine if input is gene list or regulation list
+    if isinstance(genes_or_regulations[0], tuple):
+        # Extract target genes from regulations
+        target_genes = [target for _, target in genes_or_regulations]
+        # Remove duplicates while preserving order
+        target_genes = list(dict.fromkeys(target_genes))
     else:
-        raise ValueError(f"Unknown mode {mode}.")
-    # Pseudo time
-    stat1_x = stat.pseudotime(self, pts)
-    tmp_y = stat1_y.compute(pts)
-    tmp_x = stat1_x.compute(pts)
-    dy = pd.DataFrame(tmp_y, index=stat1_y.names[0])
-    dx = pd.Series(tmp_x[0]) #first gene's pseudotime is taken as all genes have the same pseudotime
-    return dy, dx
+        # Use gene list directly
+        target_genes = list(dict.fromkeys(genes_or_regulations))
+    
+    # Calculate gradients for target genes
+    gradients = np.vstack([
+        np.gradient(dy.loc[gene].values, dx.values) 
+        for gene in target_genes
+    ])
+    
+    # Create figure and axes
+    if ax is None:
+        figsize = (figsize[0], figsize[1] * len(target_genes))
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111)
+    else:
+        if figsize is not None:
+            raise ValueError("figsize should not be set if ax is set.")
+        fig = ax.get_figure()
+        figsize = fig.get_size_inches()
+    
+    aspect = (figsize[1] / len(target_genes)) / (figsize[0] / gradients.shape[1])
+    
+    # Determine and apply colormap
+    if isinstance(cmap, str):
+        vmax = np.quantile(np.abs(gradients).ravel(), 0.95)
+        cmap = matplotlib.cm.ScalarMappable(
+            norm=matplotlib.colors.Normalize(vmin=-vmax, vmax=vmax), 
+            cmap=cmap
+        )
+    
+    if hasattr(cmap, "to_rgba"):
+        im = ax.imshow(cmap.to_rgba(gradients), aspect=aspect, interpolation='none')
+    else:
+        im = ax.imshow(gradients, aspect=aspect, interpolation='none', cmap=cmap)
+        plt.colorbar(im, label="Expression gradient (Δ Log CPM/Δ Pseudotime)")
+    
+    # Set pseudotime labels as x axis labels
+    ax.set_xlabel("Pseudotime")
+    num_ticks = 10
+    tick_positions = np.linspace(0, gradients.shape[1] - 1, num_ticks, dtype=int)
+    tick_labels = dx.iloc[tick_positions]
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels([f"{x:.6f}" for x in tick_labels], rotation=45, ha="right")
+    
+    # Set target gene labels
+    ax.set_yticks(list(range(len(target_genes))))
+    ax.set_yticklabels(target_genes)
+    
+    # Add grid lines to separate rows
+    ax.set_yticks(np.arange(len(target_genes) + 1) - 0.5, minor=True)
+    ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
+    
+    return fig, ax, cmap 
+ 
 
-def create_tf_target_pairs(dictys_dynamic_object, tf_pairs_df):
-    """
-    Create a list of TF-Target tuples from combinatorial control data,
-    checking presence of both TFs and targets in the dynamic object.
-    """
-    tf_target_pairs = []
-
-    for _, row in tf_pairs_df.iterrows():
-        # Get TF pair and targets
-        tf1, tf2 = eval(row["TF"])
-        common_targets = eval(row["common"])
-
-        # Check if TFs are present in dynamic object
-        present_tfs = check_tf_presence(dictys_dynamic_object, [tf1, tf2])
-
-        # Check if targets are present in dynamic object
-        present_targets = check_gene_presence(dictys_dynamic_object, common_targets)
-
-        # Create pairs for present TFs and targets
-        for tf in present_tfs:
-            for target in present_targets:
-                tf_target_pairs.append((tf, target))
-
-    # Remove any duplicates
-    tf_target_pairs = list(set(tf_target_pairs))
-
-    print(f"Created {len(tf_target_pairs)} unique TF-target pairs")
-    return tf_target_pairs
-
-
-if __name__ == "__main__":
-    dynamic_object_path = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added/output/dynamic.h5"
-    dynamic_object = load_dynamic_object(dynamic_object_path)
-    print("data loaded")
-    ### pseudotime label replacement with cell state labels
-    PATH_TO_CELL_LABELS = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added/data/clusters.csv"
-    cluster_labels_df = pd.read_csv(PATH_TO_CELL_LABELS)
-    cell_labels = cluster_labels_df["Cluster"].tolist()
-    state_total_counts = get_state_total_counts(cell_labels)
-    state_labels_in_window = get_state_labels_in_window(dynamic_object.prop['sc']['w'], cell_labels)
-    window_idx = 44
-    top_states = get_top_k_fraction_labels(state_labels_in_window[window_idx], state_total_counts, k=3)
-    print(f"Window {window_idx} top states:")
-    for label, (window_comp, state_dist) in top_states:
-        print(f"{label}:")
-        print(f"  - Composition of window: {window_comp:.3f}")
-        print(f"  - Distribution of state: {state_dist:.3f}")
