@@ -26,4 +26,4 @@ OUTPUT_HOMER="tmp_dynamic/Subset${SUBSET_NUM}/homer.tsv.gz"
 
 module load anaconda3/2022.10
 source activate dictys
-dictys chromatin homer --nth 120 "$INPUT_FOOTPRINTS" data/motifs.motif data/genome "$INPUT_GEX" "$OUTPUT_MOTIFS" "$OUTPUT_WELLINGTON" "$OUTPUT_HOMER"
+dictys chromatin homer --nth 120 "$INPUT_FOOTPRINTS" data/JASPAR2020_vertebrates.motif data/genome "$INPUT_GEX" "$OUTPUT_MOTIFS" "$OUTPUT_WELLINGTON" "$OUTPUT_HOMER"

@@ -92,9 +92,9 @@ def main(args):
     # check that the expression matrix is of the shape feature by cell (no features filtered)
     assert d.shape == tuple(len(x) for x in names)
 
-    # First filter: Remove unneeded features (with ":" or "." in names, which removes peaks from multiome data)
-    logging.info("Filtering out unneeded features...")
-    feature_filter = np.array([":" not in x and "." not in x for x in names[0]])
+    # First filter: Remove features with colons in names (keep only genes, also genes with ".")
+    logging.info("Filtering out features with colons, which are peaks from multiome data...")
+    feature_filter = np.array([":" not in x for x in names[0]])
     names[0] = names[0][feature_filter]
     d = d[feature_filter, :]
 
@@ -174,6 +174,6 @@ if __name__ == "__main__":
 
     ####### Run the script with args here #######
     args = parser.parse_args()
-    #args = Args()
+    #args = Args() # if you don't want to run using sbatch, just pass args to the class and run locally on the current node
     logging.basicConfig(level=logging.INFO)
     main(args)

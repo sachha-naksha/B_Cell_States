@@ -10,12 +10,8 @@ import matplotlib as mpl
 import matplotlib.patches as Patches
 from matplotlib.patches import Polygon
 from mpl_toolkits.mplot3d import Axes3D
-import plotly.graph_objects as go
 import matplotlib.pyplot as plt
-import seaborn as sns
 
-import stream as st
-import anndata as ad
 
 
 def read_h5_file(file_path):
@@ -43,6 +39,7 @@ def read_adata_from_pkl(pkl_path, workdir):
     """
     Read an AnnData object from a PKL file using stream
     """
+    import stream as st
     adata = st.read(file_name=pkl_path, workdir=workdir)
     return adata
 
@@ -124,13 +121,9 @@ def plot_main_trajectory_nodes(adata, n_components=2, comp1=0, comp2=1, fig_size
 # Example usage
 if __name__ == "__main__":
     # Load data
-    stream_outs_path = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/stream_outs/actb1_added'
-    adata = read_adata_from_pkl(os.path.join(stream_outs_path, 'stream_traj_v5.pkl'), stream_outs_path)
-    
-    # Create output directory if it doesn't exist
-    output_dir = os.path.join(stream_outs_path, 'trajectory_plots')
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Plot main trajectory nodes
-    save_path = os.path.join(output_dir, 'trajectory_nodes.png')
-    plot_main_trajectory_nodes(adata, save_path=save_path)
+    stream_outs = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/stream_outs/actb1_added"
+    dictys_data_path = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added"
+    subset_locs = read_h5_file(os.path.join(dictys_data_path, 'tmp_dynamic/subset_locs.h5'))
+    # read compressed tsv gz edges file for subsets
+    subset_edges = pd.read_csv(os.path.join(dictys_data_path, 'tmp_dynamic/subset_edges.tsv.gz'), sep='\t')
+    print("loaded")

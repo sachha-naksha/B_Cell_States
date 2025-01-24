@@ -4,48 +4,38 @@
 #SBATCH -p RM-shared
 #SBATCH -N 1 # number of nodes
 #SBATCH --ntasks-per-node=48 # number of cores per node; memory is 2gb per node for rm-shared
-#SBATCH -t 3:00:00
-#SBATCH --array=0-2 # Array with number of jobs = number of days
+#SBATCH -t 6:00:00
 
 module load anaconda3/2022.10
 
-# Define all input paths
-MATRIX_DIR=(
-    "/ocean/projects/cis240075p/skeshari/igvf/bcell2/female_donor/in_data_required/donor2_stanford/GEM2/filtered_feature_bc_matrix"
-    "/ocean/projects/cis240075p/skeshari/igvf/bcell2/female_donor/in_data_required/donor2_stanford/GEM3/filtered_feature_bc_matrix"
-    "/ocean/projects/cis240075p/skeshari/igvf/bcell2/female_donor/in_data_required/donor2_stanford/GEM6/filtered_feature_bc_matrix"
-)
+# Define all input paths if you don't have an aggr cell-ranger output (by creating a list of matrix_dir and output_files and using array jobs to get per-day expression.tsv.gz)
+MATRIX_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/outs/filtered_feature_bc_matrix"
 
-# Define the output reference expression files (on scratch)
-OUTPUT_REF_EXPRESSIONS=(
-    "$LOCAL/day2_expression.tsv.gz"
-    "$LOCAL/day3_expression.tsv.gz"
-    "$LOCAL/day6_expression.tsv.gz"
-)
+# Define the output reference expression file
+OUTPUT_FILE="expression.tsv.gz"
+OUTPUT_PATH="$LOCAL/$OUTPUT_FILE"
 
 # Python script
 PYTHON_FILE="/ocean/projects/cis240075p/asachan/bio_informatics_analysis/B_Cells_human_analysis/analysis_repo/multiome_dynamic_regulation/py_scripts/dynamic_grn/get_main_expression.py"
 
-# Destination directory for the sorted BAM folders
-DESTINATION_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_2nd_donor/expression_mtx"
+# Destination directory for the output
+DESTINATION_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/data"
 
-# Trap to ensure output folders are copied back on script exit
-trap 'cp -r ${OUTPUT_REF_EXPRESSIONS[$SLURM_ARRAY_TASK_ID]} $DESTINATION_DIR/' EXIT
+# Trap to ensure output file is copied back on script exit
+trap 'cp "$OUTPUT_PATH" "$DESTINATION_DIR/"' EXIT
 
 # Create scratch directory if it doesn't exist
 mkdir -p $LOCAL
 
-# Transfer the corresponding input directory to the scratch folder
-cp -r ${MATRIX_DIR[$SLURM_ARRAY_TASK_ID]}/* $LOCAL/
+# Transfer the input files to scratch
+cp -r "$MATRIX_DIR"/* $LOCAL/
 
 # Activate the dictys environment
 source activate dictys
 set -eo pipefail
 cd $LOCAL/
 
-# Run the python script
-OUTPUT_REF_EXPRESSION=$(basename ${OUTPUT_REF_EXPRESSIONS[$SLURM_ARRAY_TASK_ID]})
+# Run the python script with correct arguments
+python "$PYTHON_FILE" "$LOCAL" "$OUTPUT_FILE"
 
-python $PYTHON_FILE $LOCAL $OUTPUT_REF_EXPRESSION
-
-echo "get expression done for job $SLURM_ARRAY_TASK_ID"
+echo "get expression done"

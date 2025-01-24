@@ -134,6 +134,26 @@ def get_indirect_weights_across_windows(
     ]
     return indirect_weights_of_tf_target
 
+##################################### dictys code ############################################
+
+def traj_linspace(self,start:int,end:int,n:int):
+    """
+    Find evenly spaced points on a path like np.linspace
+
+    Parameters
+    ----------
+    start:	int
+        Start nodes' IDs to indicate the path
+    end:	int
+        End nodes' IDs to indicate the path
+    n:		int
+        Number of points including terminal nodes
+    """
+    assert n>=2
+    path = self.path(start,end)
+    total_length = self.lens[[self.edgedict[path[x],path[x+1]][0] for x in range(len(path)-1)]].sum()
+    locs = np.linspace(0,total_length,n)
+    return self.path_points(start,end,locs)
 
 ##################################### Utils ############################################
 
@@ -312,7 +332,6 @@ def compute_chars(
     Compute curve characteristics for one branch.
     """
     pts, fsmooth = self.linspace(start, stop, num, dist)
-    tmp_pt_0 = pts[[1]]
     if mode == "regulation":
         # Log number of targets
         stat1_net = fsmooth(stat.net(self))
@@ -596,3 +615,11 @@ def fig_expression_gradient_heatmap(
     return fig, ax, cmap 
  
 
+# if __name__ == "__main__":
+#     data_file = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added/output/dynamic.h5'
+#     output_folder = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added/output'
+#     dictys_dynamic_object = load_dynamic_object(data_file)
+#     print('loaded dynamic object')
+#     traj_object = dictys_dynamic_object.point['s'].p
+#     debug_call = traj_linspace(traj_object,1,2,100)
+#     print(debug_call)
