@@ -4,7 +4,7 @@
 #SBATCH -p RM-shared
 #SBATCH -N 1 # number of nodes
 #SBATCH --ntasks-per-node=48 # number of cores per node; memory is 2gb per node for rm-shared
-#SBATCH -t 6:00:00
+#SBATCH -t 12:00:00
 
 module load anaconda3/2022.10
 

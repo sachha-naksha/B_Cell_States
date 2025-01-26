@@ -5,7 +5,7 @@
 #SBATCH -N 1
 #SBATCH -t 1:00:00
 #SBATCH --ntasks-per-node=16 #mem=2gb per core
-#SBATCH --array=0-52
+#SBATCH --array=0-52 #number of windows
 
 # Set the working directory to where data is located
 WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/tut_files/skin"
@@ -39,7 +39,7 @@ if [[ -f "$INPUT_GEX" ]]; then
 	# ntp_cell:
 	# 	Lower bound on proportion of expressed genes for cell QC
 
-    dictys preproc qc_reads "$INPUT_GEX" "$OUTPUT_GEX" 50 10 0 200 100 0
+    dictys preproc qc_reads "$INPUT_GEX" "$OUTPUT_GEX" 50 10 0 200 10 0
 else
     echo "Error: Input file $INPUT_GEX not found for Subset${SUBSET_NUM}"
     exit 1
