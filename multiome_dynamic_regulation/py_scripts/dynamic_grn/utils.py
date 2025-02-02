@@ -4,14 +4,15 @@ import h5py
 import os
 import itertools
 from copy import deepcopy
-
+import math
+import sys
+import re
 import networkx as nx
 import matplotlib as mpl
 import matplotlib.patches as Patches
 from matplotlib.patches import Polygon
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
-
 
 
 def read_h5_file(file_path):
@@ -47,23 +48,6 @@ def plot_main_trajectory_nodes(adata, n_components=2, comp1=0, comp2=1, fig_size
                              save_path=None):
     """
     Plot and label the main trajectory nodes (S0, S1, S2, S3) on the elastic principal graph
-    
-    Parameters
-    ----------
-    adata: AnnData
-        Annotated data matrix with EPG information
-    n_components: int (default: 2)
-        Number of dimensions to plot
-    comp1, comp2: int (default: 0, 1)
-        Components to plot on x and y axes
-    fig_size: tuple (default: (8,6))
-        Size of the figure
-    save_path: str (default: None)
-        Path to save the figure. If None, saves in current directory
-    
-    Returns
-    -------
-    None
     """
     # Use 'Agg' backend for non-interactive environments
     import matplotlib
@@ -118,12 +102,103 @@ def plot_main_trajectory_nodes(adata, n_components=2, comp1=0, comp2=1, fig_size
     
     print(f"Plot saved to: {save_path}")
 
-# Example usage
-if __name__ == "__main__":
-    # Load data
-    stream_outs = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/stream_outs/actb1_added"
-    dictys_data_path = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added"
-    subset_locs = read_h5_file(os.path.join(dictys_data_path, 'tmp_dynamic/subset_locs.h5'))
-    # read compressed tsv gz edges file for subsets
-    subset_edges = pd.read_csv(os.path.join(dictys_data_path, 'tmp_dynamic/subset_edges.tsv.gz'), sep='\t')
-    print("loaded")
+def parse_motifs(file_content):
+    motifs = []
+    current_motif = None
+    lines = file_content.split('\n')
+    
+    for line in lines:
+        line = line.strip()
+        if line.startswith("MOTIF"):
+            # Start new motif
+            if current_motif:
+                motifs.append(current_motif)
+            current_motif = {
+                'name': line.split()[1],  # Get motif ID after "MOTIF"
+                'matrix': [],
+                'w': None
+            }
+        elif line.startswith("letter-probability matrix"):
+            if current_motif:
+                # Extract width from the line
+                w_match = re.search(r'w=\s*(\d+)', line)
+                current_motif['w'] = int(w_match.group(1)) if w_match else None
+        elif current_motif and current_motif['w'] is not None:
+            # Parse probability lines (skip empty lines and URL lines)
+            if line and not line.startswith("URL"):
+                try:
+                    probs = [float(x) for x in line.split()]
+                    if len(probs) == 4:  # Check for 4 probabilities (A,C,G,T)
+                        current_motif['matrix'].append(probs)
+                except ValueError:
+                    continue
+    
+    # Don't forget the last motif
+    if current_motif and current_motif['matrix']:
+        motifs.append(current_motif)
+    
+    # Debug print
+    print(f"Parsed {len(motifs)} motifs")
+    for i, motif in enumerate(motifs, 1):
+        print(f"Motif {i}: {motif['name']}, width={motif['w']}, matrix rows={len(motif['matrix'])}")
+    
+    return motifs
+
+def calculate_consensus_and_score(matrix):
+    bases = ['A', 'C', 'G', 'T']
+    consensus = []
+    score = 0.0
+    
+    for row in matrix:
+        max_val = max(row)
+        max_idx = row.index(max_val)
+        consensus.append(bases[max_idx])
+        score += math.log(max_val / 0.25)
+    
+    return ''.join(consensus), round(score, 5)
+
+def process_file(input_file, output_file=None):
+    with open(input_file, 'r') as f:
+        content = f.read()
+    motifs = parse_motifs(content)
+    print(f"Found {len(motifs)} motifs")  # Debug print
+    # Set default output file if none provided
+    if output_file is None:
+        output_file = input_file + '.motif'
+    with open(output_file, 'w') as f:
+        for i, motif in enumerate(motifs, 1):
+            # Debug prints
+            print(f"Processing motif {i}: {motif['name']}")
+            print(f"Matrix size: {len(motif['matrix'])}x{len(motif['matrix'][0]) if motif['matrix'] else 0}")
+            if not motif['matrix']:
+                print(f"Skipping motif {i}: empty matrix")
+                continue
+            # Calculate consensus sequence and score
+            consensus, score = calculate_consensus_and_score(motif['matrix'])
+            print(f"Consensus: {consensus}, Score: {score}")  # Debug print
+            # Write header line (HOMER format)
+            header = f">{consensus}\t{motif['name']}\t{score:.5f}\t-10\n"
+            f.write(header)
+            print(f"Wrote header: {header.strip()}")  # Debug print
+            # Write probability matrix
+            for row in motif['matrix']:
+                line = "\t".join(map(str, row)) + "\n"
+                f.write(line)
+                print(f"Wrote matrix row: {line.strip()}")  # Debug print
+            # Add blank line between motifs
+            f.write("\n")
+            # Ensure writing to disk
+            f.flush()
+    # Verify file was written
+    if os.path.exists(output_file):
+        print(f"File created successfully at: {output_file}")
+        print(f"File size: {os.path.getsize(output_file)} bytes")
+    else:
+        print("Error: File was not created!")
+    return output_file
+
+# if __name__ == "__main__":
+    # motif_file = "/ocean/projects/cis240075p/asachan/datasets/TF_motif_files/CisBP_Human_FigR_meme"
+    # output_file = "/ocean/projects/cis240075p/asachan/datasets/TF_motif_files/CisBP_Human_FigR_meme.motif"
+    # process_file(motif_file, output_file)
+
