@@ -9,6 +9,7 @@
 
 # Set the working directory to where data is located
 WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/tut_files/skin"
+INPUT_MASK="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/other_files/combinatorial_control/genes.txt"
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
 # Calculate the subset number based on the job array ID
@@ -39,13 +40,13 @@ if [[ -f "$INPUT_GEX" ]]; then
 	# ntp_cell:
 	# 	Lower bound on proportion of expressed genes for cell QC
 
-    dictys preproc qc_reads "$INPUT_GEX" "$OUTPUT_GEX" 50 10 0 200 10 0
+    dictys preproc qc_reads "$INPUT_GEX" "$INPUT_MASK" "$OUTPUT_GEX" 50 10 0 200 10 0
 else
     echo "Error: Input file $INPUT_GEX not found for Subset${SUBSET_NUM}"
     exit 1
 fi
 
-# get the atac filed to make a combined bam from the cells post QC (excluding dropped out cells)
+# Drop the cells that are QCed from ATAC names list as well, to make pseudobulk BAM for just the QCed cells
 if [[ -f "$INPUT_ATAC" ]]; then
     dictys preproc selects_atac "$OUTPUT_GEX" "$INPUT_ATAC" "$OUTPUT_ATAC"
 else
