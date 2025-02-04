@@ -157,7 +157,7 @@ def calculate_consensus_and_score(matrix):
     
     return ''.join(consensus), round(score, 5)
 
-def process_file(input_file, output_file=None):
+def process_motif_file(input_file, output_file=None):
     with open(input_file, 'r') as f:
         content = f.read()
     motifs = parse_motifs(content)
@@ -179,7 +179,7 @@ def process_file(input_file, output_file=None):
             # Write header line (HOMER format)
             header = f">{consensus}\t{motif['name']}\t{score:.5f}\t-10\n"
             f.write(header)
-            print(f"Wrote header: {header.strip()}")  # Debug print
+            print(f"Wrote header: {header.strip()}")  # Debug print 
             # Write probability matrix
             for row in motif['matrix']:
                 line = "\t".join(map(str, row)) + "\n"
@@ -197,8 +197,7 @@ def process_file(input_file, output_file=None):
         print("Error: File was not created!")
     return output_file
 
-# if __name__ == "__main__":
-    # motif_file = "/ocean/projects/cis240075p/asachan/datasets/TF_motif_files/CisBP_Human_FigR_meme"
-    # output_file = "/ocean/projects/cis240075p/asachan/datasets/TF_motif_files/CisBP_Human_FigR_meme.motif"
-    # process_file(motif_file, output_file)
-
+if __name__ == "__main__":
+    subset_locs = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/tmp_dynamic/subset_locs.h5'
+    data_dict = read_h5_file(subset_locs)
+    print(data_dict)
