@@ -5,7 +5,7 @@
 #SBATCH -N 1
 #SBATCH -t 00:30:00 # wall-time
 #SBATCH --ntasks-per-node=128
-#SBATCH --array=0-52
+#SBATCH --array=0-193
 
 # Set the working directory to where data and makefiles are located
 WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/tut_files/skin"
