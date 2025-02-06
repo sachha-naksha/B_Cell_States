@@ -5,10 +5,10 @@
 #SBATCH -N 1
 #SBATCH -t 00:30:00 # wall-time
 #SBATCH --ntasks-per-node=128
-#SBATCH --array=0-38
+#SBATCH --array=1-193
 
 # Set the working directory to where data and makefiles are located
-WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/tut_files/skin"
+WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2"
 # Change directory to the working directory
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
@@ -26,4 +26,18 @@ OUTPUT_HOMER="tmp_dynamic/Subset${SUBSET_NUM}/homer.tsv.gz"
 
 module load anaconda3/2022.10
 source activate dictys
-dictys chromatin homer --nth 120 "$INPUT_FOOTPRINTS" data/JASPAR2020_vertebrates.motif data/genome "$INPUT_GEX" "$OUTPUT_MOTIFS" "$OUTPUT_WELLINGTON" "$OUTPUT_HOMER"
+# Run motif scanning using direct Python call
+python -c "
+from dictys.chromatin import homer
+homer(
+    fi_bed='$INPUT_FOOTPRINTS',
+    fi_motif='data/CisBP_Human_FigR_new_score.motif',
+    dirio_genome='data/genome',
+    fi_exp='$INPUT_GEX',
+    fo_bed='$OUTPUT_MOTIFS',
+    fo_wellington='$OUTPUT_WELLINGTON',
+    fo_homer='$OUTPUT_HOMER',
+    nth=120
+)
+"
+echo "Done with motif scanning for Subset${SUBSET_NUM}"

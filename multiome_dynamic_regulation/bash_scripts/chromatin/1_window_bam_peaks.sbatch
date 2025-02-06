@@ -8,7 +8,7 @@
 #SBATCH --array=0-193
 
 # Set the working directory to where data and makefiles are located
-WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/tut_files/skin"
+WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2"
 # Change directory to the working directory
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
@@ -25,5 +25,19 @@ OUTPUT_PEAKS="tmp_dynamic/Subset${SUBSET_NUM}/peaks.bed"
 # bash runs all commands sequentially
 module load anaconda3/2022.10
 source activate dictys
-dictys chromatin macs2 --nth 100 "$INPUT_ATAC" data/bams "$OUTPUT_BAM" "$OUTPUT_BAI" "$OUTPUT_PEAKS" hs
+
+# Run peak calling using direct Python call
+python -c "
+from dictys.chromatin import macs2
+macs2(
+    fi_names='$INPUT_ATAC',
+    fi_bam='data/bams',
+    fo_bam='$OUTPUT_BAM',
+    fo_bai='$OUTPUT_BAI',
+    fo_bed='$OUTPUT_PEAKS',
+    genome_size='hs',
+    nth=100
+)
+"
+
 echo "Done with peak calling for Subset${SUBSET_NUM}"

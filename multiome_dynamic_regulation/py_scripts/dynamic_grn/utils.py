@@ -224,7 +224,7 @@ def plot_main_trajectory_nodes(
     print(f"Plot saved to: {save_path}")
 
 
-def parse_motifs(file_content):
+def parse_cisBP_motifs(file_content):
     motifs = []
     current_motif = None
     lines = file_content.split("\n")
@@ -268,55 +268,66 @@ def parse_motifs(file_content):
 
     return motifs
 
-
-def calculate_consensus_and_score(matrix):
-    bases = ["A", "C", "G", "T"]
-    consensus = []
-    score = 0.0
-
-    for row in matrix:
-        max_val = max(row)
-        max_idx = row.index(max_val)
-        consensus.append(bases[max_idx])
-        score += math.log(max_val / 0.25)
-
-    return "".join(consensus), round(score, 5)
-
-
-def process_motif_file(input_file, output_file=None):
+def process_motif_file_in_homer_format(input_file, output_file=None):
     with open(input_file, "r") as f:
         content = f.read()
-    motifs = parse_motifs(content)
+    motifs = parse_cisBP_motifs(content)
     print(f"Found {len(motifs)} motifs")  # Debug print
+    
     # Set default output file if none provided
     if output_file is None:
         output_file = input_file + ".motif"
+    
+    # Track seen TF names to skip duplicates
+    seen_tfs = set()  # Use a set to track unique TF names
+    
+    # Constant score for all motifs
+    CONSTANT_SCORE = 6.9
+        
     with open(output_file, "w") as f:
         for i, motif in enumerate(motifs, 1):
+            # Skip if we've seen this TF before
+            base_name = motif['name']
+            if base_name in seen_tfs:
+                print(f"Skipping duplicate motif for {base_name}")
+                continue
+                
+            seen_tfs.add(base_name)  # Add to seen set
+            
             # Debug prints
-            print(f"Processing motif {i}: {motif['name']}")
+            print(f"Processing motif {i}: {base_name}")
             print(
                 f"Matrix size: {len(motif['matrix'])}x{len(motif['matrix'][0]) if motif['matrix'] else 0}"
             )
             if not motif["matrix"]:
                 print(f"Skipping motif {i}: empty matrix")
                 continue
-            # Calculate consensus sequence and score
-            consensus, score = calculate_consensus_and_score(motif["matrix"])
-            print(f"Consensus: {consensus}, Score: {score}")  # Debug print
-            # Write header line (HOMER format)
-            header = f">{consensus}\t{motif['name']}\t{score:.5f}\t-10\n"
+                
+            # Calculate only consensus sequence
+            consensus = "".join(["ACGT"[row.index(max(row))] for row in motif["matrix"]])
+            
+            # Add _MEME1 suffix
+            modified_name = f"{base_name}_MEME1"
+            
+            # Write header line
+            header = f">{consensus}\t{modified_name}\t{CONSTANT_SCORE:.5f}\t-10\n"
             f.write(header)
             print(f"Wrote header: {header.strip()}")  # Debug print
+            
             # Write probability matrix
             for row in motif["matrix"]:
                 line = "\t".join(map(str, row)) + "\n"
                 f.write(line)
                 print(f"Wrote matrix row: {line.strip()}")  # Debug print
+            
             # Add blank line between motifs
             f.write("\n")
             # Ensure writing to disk
             f.flush()
+    
+    print(f"\nProcessed {len(seen_tfs)} unique TFs")
+    print(f"Skipped {len(motifs) - len(seen_tfs)} duplicate motifs")
+    
     # Verify file was written
     if os.path.exists(output_file):
         print(f"File created successfully at: {output_file}")
@@ -325,10 +336,7 @@ def process_motif_file(input_file, output_file=None):
         print("Error: File was not created!")
     return output_file
 
-
 if __name__ == "__main__":
-    input_mask = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/other_files/combinatorial_control/genes.txt"
-    input_gex = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/tmp_dynamic/Subset63/expression0.tsv.gz"
-    output_gex = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/tmp_dynamic/Subset63/expression.tsv.gz"
-    qc_reads(input_gex, input_mask, output_gex, 50, 10, 0, 200, 10, 0)
-    print("QC done")
+    input_file = "/ocean/projects/cis240075p/asachan/datasets/TF_motif_files/CisBP_Human_FigR_meme"
+    output_file = "/ocean/projects/cis240075p/asachan/datasets/TF_motif_files/CisBP_Human_FigR_meme.motif"
+    process_motif_file_in_homer_format(input_file, output_file)
