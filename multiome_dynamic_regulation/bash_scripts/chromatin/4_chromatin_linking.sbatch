@@ -3,8 +3,9 @@
 #SBATCH --output="tf_tg_priors.out"
 #SBATCH -p RM
 #SBATCH -N 1
-#SBATCH -t 01:00:00 
+#SBATCH -t 00:30:00 
 #SBATCH --ntasks-per-node=128
+#SBATCH --array=1-193
 
 # Set the working directory to where data and makefiles are located
 WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2"
@@ -12,8 +13,7 @@ WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
 # Calculate the subset number based on the job array ID
-#SUBSET_NUM=$((SLURM_ARRAY_TASK_ID + 1))
-SUBSET_NUM=1
+SUBSET_NUM=$((SLURM_ARRAY_TASK_ID + 1))
 
 # Construct the input and output file paths
 INPUT_GEX="tmp_dynamic/Subset${SUBSET_NUM}/expression.tsv.gz"
@@ -30,7 +30,8 @@ module load anaconda3/2022.10
 source activate dictys
 
 python -c "
-from dictys.chromatin import binding, tssdist, linking
+# make sure to import all functions
+from dictys.chromatin import binding, tssdist, linking, binlinking
 
 # Get binding score by using footprinting and motif scanning scores
 binding(
