@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name="auto_reconstruct_submit"
 #SBATCH --output="reconstruct_windows_auto.log"  # Single log file for the submission job
-#SBATCH -p RM-shared           # Use a CPU-only partition (e.g., RM)
+#SBATCH -p RM-shared           # Use a CPU-only partition for job submission script
 #SBATCH -N 1            # Request 1 node
 #SBATCH  --ntasks-per-node=1     # Single task for submission
-#SBATCH -t 48:00:00 # Time for the submission script (can be adjusted)
+#SBATCH -t 1:00:00 # Time for the submission script (can be adjusted)
 
 # Set working directory
 WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2"
@@ -25,8 +25,8 @@ available_nodes=$(get_available_gpu_nodes)
 echo "Available GPU nodes: $available_nodes"
 
 #################################### Define windows and batch size ####################################
-start_window=1
-end_window=4
+start_window=5
+end_window=194
 batch_size=4  # Maximum batch size is 4 windows (1.75 hours per window) (this can change based on available gpu nodes)
 
 #################################### Submit jobs in batches ####################################

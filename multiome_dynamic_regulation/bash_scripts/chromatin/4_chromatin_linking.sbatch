@@ -22,7 +22,7 @@ INPUT_HOMER="tmp_dynamic/Subset${SUBSET_NUM}/homer.tsv.gz"
 BINDING="tmp_dynamic/Subset${SUBSET_NUM}/binding.tsv.gz"
 TSSDIST="tmp_dynamic/Subset${SUBSET_NUM}/tssdist.tsv.gz"
 LINKING="tmp_dynamic/Subset${SUBSET_NUM}/linking.tsv.gz"
-OUTPUT_BINLINKING="tmp_dynamic/Subset${SUBSET_NUM}/binlinking.tsv.gz"
+BINLINKING="tmp_dynamic/Subset${SUBSET_NUM}/binlinking.tsv.gz"
 
 ################ RUN dictys in dynamic mode ################
 # bash runs all commands sequentially, so does python
@@ -58,7 +58,7 @@ linking(
 # Create binary linking data
 binlinking(
     fi_linking='$LINKING',
-    fo_binlinking='$OUTPUT_BINLINKING',
+    fo_binlinking='$BINLINKING',
     n=20
 )
 "

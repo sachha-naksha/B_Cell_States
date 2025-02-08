@@ -13,8 +13,6 @@ import ipdb
 
 PATH_TO_CELL_LABELS = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added/data/clusters.csv"
 
-######################### Data retrieval #########################
-
 def load_dynamic_object(dynamic_object_path):
     """
     Load the dynamic object from the given path
@@ -22,6 +20,7 @@ def load_dynamic_object(dynamic_object_path):
     dynamic_object = dictys.net.dynamic_network.from_file(dynamic_object_path)
     return dynamic_object
 
+######################### Indices retrieval #########################
 
 def get_tf_indices(dictys_dynamic_object, tf_list):
     """
@@ -29,8 +28,11 @@ def get_tf_indices(dictys_dynamic_object, tf_list):
     """
     gene_hashmap = dictys_dynamic_object.ndict
     tf_mappings_to_gene_hashmap = dictys_dynamic_object.nids[0]
+    
     tf_indices = []
     gene_indices = []
+    missing_tfs = []
+
     for gene in tf_list:
         # Check if the gene is in the gene_hashmap
         if gene in gene_hashmap:
@@ -40,10 +42,13 @@ def get_tf_indices(dictys_dynamic_object, tf_list):
             if match.size > 0:  # If a match is found
                 tf_indices.append(int(match[0]))  # Append the position of the match
                 gene_indices.append(int(gene_index))  # Also append the gene index
-    return tf_indices, gene_indices
+            else:
+                missing_tfs.append(gene)  # Gene exists but not as a TF
+        else:
+            missing_tfs.append(gene)  # Gene not found at all
+    return tf_indices, gene_indices, missing_tfs
 
-
-def get_target_gene_indices(dictys_dynamic_object, target_list):
+def get_target_indices(dictys_dynamic_object, target_list):
     """
     Get the indices of target genes from a list, if present in ndict and nids[1].
     """
@@ -54,14 +59,14 @@ def get_target_gene_indices(dictys_dynamic_object, target_list):
             target_indices.append(gene_hashmap[gene])
     return target_indices
 
-def get_all_target_names(dictys_dynamic_object):
+def get_all_gene_names(dictys_dynamic_object):
     """
     Get all possible target gene names from the dynamic object's ndict
     """
     # Get all gene names from ndict
-    target_names = list(dictys_dynamic_object.ndict.keys())
-    target_names.sort()  # Sort for consistency
-    return target_names
+    gene_names = list(dictys_dynamic_object.ndict.keys())
+    gene_names.sort()  # Sort for consistency
+    return gene_names
 
 def get_pseudotime_of_windows(dictys_dynamic_object, window_indices):
     """
@@ -75,85 +80,254 @@ def get_pseudotime_of_windows(dictys_dynamic_object, window_indices):
     ]
     return branch_pseudotime
 
-def get_grn_weights_across_windows(dictys_dynamic_object, tf_indices=None, gene_indices=None, window_indices=None):
+######################### Edge weights retrieval #########################
+
+def get_one_hop_grn_weights(dictys_dynamic_object, tf_indices=None, gene_indices=None, window_indices=None, nonzero_fraction_threshold=0.1):
     """
-    Get the weights matrix for both specified TFs and TFs regulating specified targets
+    Get the weights matrix for both specified TFs and TFs regulating specified targets (mostly local GRN of LF),
+    after filtering the global GRN by sparsity across pseudotime
     """
     # Get the weights array
-    weights = dictys_dynamic_object.prop["es"]["w_n"]  
-    # Convert indices to lists if they're not already
+    global_grn_weights = dictys_dynamic_object.prop["es"]["w_n"]
+
+    # Apply sparsity filter to global GRN first
+    nonzero_edge_fraction_across_pseudotime = (global_grn_weights != 0).mean(axis=2)  # mean of a boolean, shape is total TFs x total targets
+    edge_sparsity_filter = nonzero_edge_fraction_across_pseudotime >= nonzero_fraction_threshold
+
+    # Convert query indices to lists if they're not already
     tf_indices = list(tf_indices) if tf_indices is not None else []
     gene_indices = list(gene_indices) if gene_indices is not None else []
-    # Get all TF indices that regulate the specified target genes
+
+    # Augment the TF indices that regulate the specified target genes (considering sparsity)
     if gene_indices:
-        # weights shape is (n_tfs, n_genes, n_windows)
-        tf_mask = np.any(np.any(weights[:, gene_indices, :] != 0, axis=2), axis=1) #shape (n_tfs,)
+        # Only consider edges that pass sparsity filter
+        tf_mask = np.any(edge_sparsity_filter[:, gene_indices], axis=1)
         regulating_tf_indices = np.where(tf_mask)[0]
         # Combine with specified TF indices, removing duplicates while preserving order
         all_tf_indices = list(dict.fromkeys(tf_indices + list(regulating_tf_indices)))
     else:
         all_tf_indices = tf_indices
-
-    # Get all gene indices that are regulated by the specified TFs
+    
+    # Augment target gene indices that are regulated by the specified TFs (considering sparsity)
     if tf_indices:
-        gene_mask = np.any(np.any(weights[tf_indices, :, :] != 0, axis=2), axis=0) #shape (n_genes,)
+        # Only consider edges that pass sparsity filter
+        gene_mask = np.any(edge_sparsity_filter[tf_indices, :], axis=0)
         regulated_gene_indices = np.where(gene_mask)[0]
-        
         # Combine with specified gene indices, removing duplicates while preserving order
         all_gene_indices = list(dict.fromkeys(gene_indices + list(regulated_gene_indices)))
     else:
         all_gene_indices = gene_indices
 
     # Extract the combined weights matrix using the computed indices
-    combined_weights = weights[np.ix_(all_tf_indices, all_gene_indices, window_indices)]
+    combined_weights = global_grn_weights[np.ix_(all_tf_indices, all_gene_indices, window_indices)]
+    # Apply sparsity mask to final weights (in case non-augmented edges don't meet threshold)
+    final_sparsity_mask = edge_sparsity_filter[np.ix_(all_tf_indices, all_gene_indices)]
+    combined_weights = np.where(final_sparsity_mask[:, :, np.newaxis], combined_weights, 0)
     return combined_weights, all_tf_indices, all_gene_indices
 
-def get_weights_for_tf_target_pairs(
-    dictys_dynamic_object, tf_indices, target_indices, window_indices
+def get_grn_weights_for_tfs(dictys_dynamic_object, tf_indices=None, window_indices=None, nonzero_fraction_threshold=0.1):
+    """
+    Get the weights matrix for specified TFs over specific windows
+    """
+    # Get the weights array
+    global_grn_weights = dictys_dynamic_object.prop["es"]["w_n"]
+    
+    # Convert indices to numpy arrays and ensure they're integers
+    tf_indices = np.array(tf_indices, dtype=int) if tf_indices is not None else np.array([], dtype=int)
+    window_indices = np.array(window_indices, dtype=int) if window_indices is not None else np.array([], dtype=int)
+    
+    # Get dimensions
+    n_targets = global_grn_weights.shape[1]
+    
+    # Calculate non-zero fractions across time for the specified TFs
+    nonzero_edge_fraction = np.mean(global_grn_weights[tf_indices] != 0, axis=2)  # shape: (n_selected_tfs, n_targets)
+    
+    # Create sparsity mask
+    sparsity_mask = nonzero_edge_fraction >= nonzero_fraction_threshold  # shape: (n_selected_tfs, n_targets)
+    
+    # Extract weights for specified TFs and windows
+    weights = global_grn_weights[tf_indices, :, :]  # shape: (n_selected_tfs, n_targets, n_windows)
+    weights = weights[:, :, window_indices]  # Select specific windows
+    
+    # Apply sparsity mask
+    weights = np.where(sparsity_mask[:, :, np.newaxis], weights, 0)
+    
+    print(f"Output shape: {weights.shape} (n_tfs={len(tf_indices)}, n_targets={n_targets}, n_windows={len(window_indices)})")
+    return weights
+
+def get_grn_weights_for_tf_target_pairs(
+    dictys_dynamic_object, tf_indices=None, target_indices=None, window_indices=None, nonzero_fraction_threshold=0.1
 ):
     """
     Get the weights for specific TF-target pairs over specific windows.
     """
-    # Access the 3-D array of weights using the correct dimensions
-    weights_of_tf_target = dictys_dynamic_object.prop["es"]["w_n"][
-        np.ix_(tf_indices, target_indices, window_indices)
-    ]
+    # Get the weights array
+    global_grn_weights = dictys_dynamic_object.prop["es"]["w_n"]
+    # Apply sparsity filter to global GRN first
+    nonzero_edge_fraction_across_pseudotime = (global_grn_weights != 0).mean(axis=2)  # mean of a boolean, shape is total TFs x total targets
+    edge_sparsity_filter = nonzero_edge_fraction_across_pseudotime >= nonzero_fraction_threshold
+    
+    # Get weights of the specified TF-target pairs over the specified windows
+    weights_of_tf_target = global_grn_weights[np.ix_(tf_indices, target_indices, window_indices)]
+    # Apply sparsity mask to final weights (in case any edges don't meet threshold)
+    final_sparsity_mask = edge_sparsity_filter[np.ix_(tf_indices, target_indices)]
+    weights_of_tf_target = np.where(final_sparsity_mask[:, :, np.newaxis], weights_of_tf_target, 0)
     return weights_of_tf_target
 
-def get_indirect_weights_across_windows(
-    dictys_dynamic_object, tf_indices, window_indices
+def get_indirect_grn_weights_for_tfs(
+    dictys_dynamic_object, tf_indices=None, window_indices=None, nonzero_fraction_threshold=0.1
 ):
     """
     Get the indirect weights of TFs over specific windows for x-axis in plots
     """
-    array_shape = dictys_dynamic_object.prop["es"]["w_in"].shape
-    n_targets = array_shape[1]
-
-    indirect_weights_of_tf_target = dictys_dynamic_object.prop["es"]["w_in"][
-        np.ix_(tf_indices, range(n_targets), window_indices)
-    ]
+    # Get the weights array
+    global_grn_weights = dictys_dynamic_object.prop["es"]["w_in"]
+    # Apply sparsity filter to global GRN first
+    nonzero_edge_fraction_across_pseudotime = (global_grn_weights != 0).mean(axis=2)  # mean of a boolean, shape is total TFs x total targets
+    edge_sparsity_filter = nonzero_edge_fraction_across_pseudotime >= nonzero_fraction_threshold
+    
+    # Convert indices to lists if they're not already
+    tf_indices = list(tf_indices) if tf_indices is not None else []
+    window_indices = list(window_indices) if window_indices is not None else []
+    
+    # Get the indirect weights of the specified TFs over the specified windows
+    indirect_weights_of_tf_target = global_grn_weights[np.ix_(tf_indices, slice(None), window_indices)]
+    # Apply sparsity mask to final weights (in case any edges don't meet threshold)
+    final_sparsity_mask = edge_sparsity_filter[np.ix_(tf_indices, slice(None))]
+    indirect_weights_of_tf_target = np.where(final_sparsity_mask[:, :, np.newaxis], indirect_weights_of_tf_target, 0)
     return indirect_weights_of_tf_target
 
-##################################### dictys code ############################################
+##################################### Similarity metrics ############################################
 
-def traj_linspace(self,start:int,end:int,n:int):
+def get_sign_switching_pairs(pb_weights, gc_weights, tf_names, target_names, 
+                           edge_presence_threshold=0.3,
+                           mean_weight=0.3,
+                           spread_weight=0.2,
+                           min_sign_changes=2):
     """
-    Find evenly spaced points on a path like np.linspace
-
-    Parameters
-    ----------
-    start:	int
-        Start nodes' IDs to indicate the path
-    end:	int
-        End nodes' IDs to indicate the path
-    n:		int
-        Number of points including terminal nodes
+    Find TF-target pairs that show regulation sign changes between PB and GC branches,
+    prioritizing by number of sign changes and considering mean and spread differences.
+    
+    Parameters:
+    -----------
+    pb_weights, gc_weights : np.ndarray
+        Weight matrices for PB and GC branches (shape: n_tfs x n_targets x n_windows)
+    tf_names, target_names : list
+        Lists of TF and target gene names
+    edge_presence_threshold : float
+        Minimum fraction of non-zero values required in each branch
+    mean_weight : float
+        Weight for mean difference contribution to final score
+    spread_weight : float
+        Weight for spread difference contribution to final score
+    min_sign_changes : int
+        Minimum number of sign changes required to consider a pair
+    
+    Returns:
+    --------
+    filtered_pairs : list of tuples
+        List of (TF, target) pairs that pass filtering criteria
+    pair_scores : list of floats
+        Corresponding scores for each pair
+    pair_metrics : list of dicts
+        Detailed metrics for each pair
     """
-    assert n>=2
-    path = self.path(start,end)
-    total_length = self.lens[[self.edgedict[path[x],path[x+1]][0] for x in range(len(path)-1)]].sum()
-    locs = np.linspace(0,total_length,n)
-    return self.path_points(start,end,locs)
+    # Verify dimensions
+    assert len(tf_names) == pb_weights.shape[0], "Number of TF names doesn't match weight matrix"
+    assert len(target_names) == pb_weights.shape[1], "Number of target names doesn't match weight matrix"
+    
+    n_windows = min(pb_weights.shape[2], gc_weights.shape[2])
+    
+    # Calculate edge presence in each branch
+    pb_edge_presence = np.mean(pb_weights[:, :, :n_windows] != 0, axis=2)
+    gc_edge_presence = np.mean(gc_weights[:, :, :n_windows] != 0, axis=2)
+    edge_present = (pb_edge_presence > edge_presence_threshold) & \
+                  (gc_edge_presence > edge_presence_threshold)
+    
+    # Initialize arrays to store metrics
+    sign_changes = np.zeros((pb_weights.shape[0], pb_weights.shape[1]))
+    mean_diffs = np.zeros_like(sign_changes)
+    spread_diffs = np.zeros_like(sign_changes)
+    
+    # Calculate metrics for each TF-target pair
+    for i in range(pb_weights.shape[0]):
+        for j in range(pb_weights.shape[1]):
+            if edge_present[i, j]:
+                pb_vals = pb_weights[i, j, :n_windows]
+                gc_vals = gc_weights[i, j, :n_windows]
+                
+                # Count sign changes
+                sign_diff = np.sign(pb_vals) != np.sign(gc_vals)
+                sign_changes[i, j] = np.sum(sign_diff & (pb_vals != 0) & (gc_vals != 0))
+                
+                # Calculate mean difference
+                pb_mean = np.mean(pb_vals)
+                gc_mean = np.mean(gc_vals)
+                mean_diffs[i, j] = np.abs(pb_mean - gc_mean)
+                
+                # Calculate spread difference (using standard deviation)
+                pb_spread = np.std(pb_vals)
+                gc_spread = np.std(gc_vals)
+                spread_diffs[i, j] = np.abs(pb_spread - gc_spread)
+    
+    # Normalize mean and spread differences to [0, 1] range
+    mean_diffs_norm = mean_diffs / np.max(mean_diffs) if np.max(mean_diffs) > 0 else mean_diffs
+    spread_diffs_norm = spread_diffs / np.max(spread_diffs) if np.max(spread_diffs) > 0 else spread_diffs
+    
+    # Filter pairs with more than minimum sign changes
+    sufficient_changes = sign_changes >= min_sign_changes
+    
+    # Calculate composite scores
+    # Note: sign_changes are not normalized as they are the primary filter
+    composite_scores = (sign_changes + 
+                       mean_weight * mean_diffs_norm + 
+                       spread_weight * spread_diffs_norm)
+    
+    # Get indices of pairs that pass filters
+    tf_idx, target_idx = np.where(sufficient_changes & edge_present)
+    
+    # Get scores and sort
+    scores = composite_scores[tf_idx, target_idx]
+    sort_idx = np.argsort(-scores)
+    
+    # Create output lists
+    filtered_pairs = []
+    pair_scores = []
+    pair_metrics = []
+    
+    for i in sort_idx:
+        tf_i = tf_idx[i]
+        target_i = target_idx[i]
+        
+        filtered_pairs.append((tf_names[tf_i], target_names[target_i]))
+        pair_scores.append(scores[i])
+        
+        # Store detailed metrics
+        pair_metrics.append({
+            'sign_changes': sign_changes[tf_i, target_i],
+            'mean_diff': mean_diffs[tf_i, target_i],
+            'spread_diff': spread_diffs[tf_i, target_i],
+            'pb_pattern': pb_weights[tf_i, target_i, :n_windows],
+            'gc_pattern': gc_weights[tf_i, target_i, :n_windows]
+        })
+    
+    # Print summary statistics
+    print(f"\nSign-Switching Edge Statistics:")
+    print(f"Total edges examined: {np.sum(edge_present):,}")
+    print(f"Edges with ≥{min_sign_changes} sign changes: {np.sum(sufficient_changes):,}")
+    print(f"Final pairs: {len(filtered_pairs):,}")
+    
+    if filtered_pairs:
+        print("\nTop switching pairs:")
+        for i in range(min(10, len(filtered_pairs))):
+            tf, target = filtered_pairs[i]
+            metrics = pair_metrics[i]
+            print(f"\n{tf} -> {target}")
+            print(f"Sign changes: {metrics['sign_changes']:.0f}")
+            print(f"Mean difference: {metrics['mean_diff']:.3f}")
+            print(f"Spread difference: {metrics['spread_diff']:.3f}")
+    
+    return filtered_pairs, pair_scores, pair_metrics
 
 ##################################### Utils ############################################
 
@@ -204,42 +378,6 @@ def get_top_k_fraction_labels(dictys_dynamic_object, window_idx, cell_labels, k=
                          key=lambda x: (x[1][1], x[1][0]),
                          reverse=True)
     return sorted_states[:k]
-
-def check_tf_presence(dictys_dynamic_object, tf_list):
-    """
-    Check if the TFs are present in the dynamic network object.
-    """
-    gene_hashmap = dictys_dynamic_object.ndict
-    tf_mappings_to_gene_hashmap = dictys_dynamic_object.nids[0]
-
-    tfs_present_in_dynamic_object = []
-    for tf in tf_list:
-        # Check if the TF is in the gene_hashmap
-        if tf in gene_hashmap:
-            gene_index = gene_hashmap[tf]
-            # Check if the gene index is present in tf_mappings_to_gene_hashmap
-            if np.any(tf_mappings_to_gene_hashmap == gene_index):
-                tfs_present_in_dynamic_object.append(tf)
-
-    return tfs_present_in_dynamic_object
-
-def check_gene_presence(dictys_dynamic_object, gene_list):
-    """
-    Check if the genes are present as targets in the dynamic network object.
-    """
-    gene_hashmap = dictys_dynamic_object.ndict
-    target_mappings_to_hashmap = dictys_dynamic_object.nids[1]
-
-    target_genes_present_in_dynamic_object = []
-    for gene in gene_list:
-        # Check if the gene is in the gene_hashmap
-        if gene in gene_hashmap:
-            gene_index = gene_hashmap[gene]
-            # Check if the gene index is present in target_mappings_to_hashmap
-            if np.any(target_mappings_to_hashmap == gene_index):
-                target_genes_present_in_dynamic_object.append(gene)
-
-    return target_genes_present_in_dynamic_object
 
 def cluster_regulations(dnet, regulations, method='ward'):
     """
