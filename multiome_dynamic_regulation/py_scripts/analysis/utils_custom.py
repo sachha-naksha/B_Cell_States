@@ -475,7 +475,7 @@ def fig_regulation_heatmap(
     num: int = 100,
     dist: float = 1.5,
     ax: Optional[matplotlib.axes.Axes] = None,
-    cmap: Union[str, matplotlib.cm.ScalarMappable] = "coolwarm",
+    cmap: Union[str, matplotlib.cm.ScalarMappable] = 'coolwarm',
     figsize: Tuple[float, float] = (2, 0.15),
     vmax: Optional[float] = None
 ) -> Tuple[matplotlib.pyplot.Figure, matplotlib.axes.Axes, matplotlib.cm.ScalarMappable]:
@@ -807,7 +807,84 @@ def fig_expression_gradient_heatmap(
     ax.set_yticks(np.arange(len(target_genes) + 1) - 0.5, minor=True)
     ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
     return fig, ax, cmap 
- 
+
+def fig_expression_heatmap(
+    network: dictys.net.dynamic_network,
+    start: int,
+    stop: int,
+    genes_or_regulations: Union[list[str], list[Tuple[str, str]]],
+    num: int = 100,
+    dist: float = 1.5,
+    ax: Optional[matplotlib.axes.Axes] = None,
+    cmap: Union[str, matplotlib.cm.ScalarMappable] = "coolwarm",
+    figsize: Tuple[float, float] = (2, 0.15)
+) -> Tuple[matplotlib.pyplot.Figure, matplotlib.axes.Axes, matplotlib.cm.ScalarMappable]:
+    """
+    Draws pseudo-time dependent heatmap of expression values.
+    """
+    # Get expression data
+    dy, dx = compute_chars(network, start, stop, num, dist, mode='expression')
+    
+    # Determine if input is gene list or regulation list
+    if isinstance(genes_or_regulations[0], tuple):
+        # Extract target genes from regulations
+        target_genes = [target for _, target in genes_or_regulations]
+        # Remove duplicates while preserving order
+        target_genes = list(dict.fromkeys(target_genes))
+    else:
+        # Use gene list directly
+        target_genes = list(dict.fromkeys(genes_or_regulations))
+    
+    # Get expression values for target genes (instead of gradients)
+    expressions = np.vstack([
+        dy.loc[gene].values
+        for gene in target_genes
+    ])
+    
+    # Create figure and axes
+    if ax is None:
+        figsize = (figsize[0], figsize[1] * len(target_genes))
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111)
+    else:
+        if figsize is not None:
+            raise ValueError("figsize should not be set if ax is set.")
+        fig = ax.get_figure()
+        figsize = fig.get_size_inches()
+    
+    aspect = (figsize[1] / len(target_genes)) / (figsize[0] / expressions.shape[1])
+    
+    # Determine and apply colormap
+    if isinstance(cmap, str):
+        vmax = np.quantile(np.abs(expressions).ravel(), 0.95)
+        cmap = matplotlib.cm.ScalarMappable(
+            norm=matplotlib.colors.Normalize(vmin=-vmax, vmax=vmax), 
+            cmap=cmap
+        )
+    
+    if hasattr(cmap, "to_rgba"):
+        im = ax.imshow(cmap.to_rgba(expressions), aspect=aspect, interpolation='none')
+    else:
+        im = ax.imshow(expressions, aspect=aspect, interpolation='none', cmap=cmap)
+        plt.colorbar(im, label="Expression (Log CPM)")  # Updated label
+    
+    # Set pseudotime labels as x axis labels
+    ax.set_xlabel("Pseudotime")
+    num_ticks = 10
+    tick_positions = np.linspace(0, expressions.shape[1] - 1, num_ticks, dtype=int)
+    tick_labels = dx.iloc[tick_positions]
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels([f"{x:.6f}" for x in tick_labels], rotation=45, ha="right")
+    
+    # Set target gene labels
+    ax.set_yticks(list(range(len(target_genes))))
+    ax.set_yticklabels(target_genes)
+    
+    # Add grid lines to separate rows
+    ax.set_yticks(np.arange(len(target_genes) + 1) - 0.5, minor=True)
+    ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
+    
+    return fig, ax, cmap
 
 if __name__ == "__main__":
     data_file = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output/dynamic.h5'
