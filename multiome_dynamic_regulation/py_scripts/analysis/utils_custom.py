@@ -2,20 +2,20 @@ import os
 from typing import Optional, Tuple, Union
 
 import dictys
+from dictys.utils.numpy import NDArray,ArrayLike
+from dictys.net import stat
 import matplotlib
-import matplotlib.colors as colors
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from dictys.net import stat
-from dictys.plot.dynamic import _compute_chars_
-import functools
+from joblib import Memory
 
 PATH_TO_CELL_LABELS = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/data/clusters.csv"
 
 # To-Do: Create a retrieval class with all functions to retrieve indices, names, weights, etc.
-
-@functools.lru_cache(maxsize=1)
+#caches the dynamic object on disk as it is a large file, and needs to be loaded for every run
+memory = Memory(location='cache_directory', verbose=0)
+@memory.cache 
 def load_dynamic_object(dynamic_object_path):
     """
     Load the dynamic object from the given path
@@ -347,7 +347,7 @@ def get_top_k_fraction_labels(dictys_dynamic_object, window_idx, cell_labels, k=
                          reverse=True)
     return sorted_states[:k]
 
-def compute_chars(
+def compute_curves(
     dictys_dynamic_object,
     start: int,
     stop: int,
@@ -357,7 +357,7 @@ def compute_chars(
     sparsity: float = 0.01,
 ) -> pd.DataFrame:
     """
-    Compute curve characteristics for one branch.
+    Compute curves for one branch.
     """
     pts, fsmooth = dictys_dynamic_object.linspace(start, stop, num, dist)
     if mode == "regulation":
@@ -376,6 +376,122 @@ def compute_chars(
     dy = pd.DataFrame(tmp_y, index=stat1_y.names[0])
     dx = pd.Series(tmp_x[0]) #first gene's pseudotime is taken as all genes have the same pseudotime
     return dy, dx
+
+def auc(dx:NDArray[float],dy:NDArray[float])->NDArray[float]:
+	"""
+	Computes area under the curves.
+
+	Parameters
+	----------
+	dx:	numpy.ndarray(shape=(n,))
+		X coordinates 
+	dy:	numpy.ndarray(shape=(ny,n))
+		Y coordinates, one for each y curve
+
+	Returns
+	-------
+	numpy.ndarray(shape=(ny,))
+		Area under the curves
+	"""
+	if len(dx)<2 or not (dx[1:]>dx[:-1]).all():
+		raise ValueError('dx must be increasing and have at least 2 values.')
+	dxdiff=dx[1:]-dx[:-1]
+	dymean=(dy[:,1:]+dy[:,:-1])/2
+	ans=dymean@dxdiff
+	return ans
+
+def _dynamic_network_char_transient_logfc_(dx:NDArray[float],dy:NDArray[float])->NDArray[float]:
+	"""
+	Computes transient logFC for curves.
+
+	Parameters
+	----------
+	dx:	numpy.ndarray(shape=(n,))
+		X coordinates 
+	dy:	numpy.ndarray(shape=(ny,n))
+		Y coordinates, one for each y curve
+
+	Returns
+	-------
+	numpy.ndarray(shape=(ny,))
+		Transient logFCs
+	"""
+	import numpy as np
+	n=dy.shape[1]
+	dx=(dx-dx[0])/(dx[-1]-dx[0])
+	dy=dy-np.median([dy,np.repeat(dy[:,[0]],n,axis=1),np.repeat(dy[:,[-1]],n,axis=1)],axis=0)
+	return auc(dx,dy)
+
+def _dynamic_network_char_switching_time_(dx:NDArray[float],dy:NDArray[float])->NDArray[float]:
+	"""
+	Computes switching time for curves.
+
+	Parameters
+	----------
+	dx:	numpy.ndarray(shape=(n,))
+		X coordinates 
+	dy:	numpy.ndarray(shape=(ny,n))
+		Y coordinates, one for each y curve
+
+	Returns
+	-------
+	numpy.ndarray(shape=(ny,))
+		Switching time
+	"""
+	import numpy as np
+	n=dy.shape[1]
+	dx=(dx-dx[0])/(dx[-1]-dx[0])
+	dy=np.median([dy,np.repeat(dy[:,[0]],n,axis=1),np.repeat(dy[:,[-1]],n,axis=1)],axis=0)
+	return (auc(dx,(dy.T-dy[:,-1]).T))/(dy[:,0]-dy[:,-1]+1E-300)
+
+def _dynamic_network_char_terminal_logfc_(dx:NDArray[float],dy:NDArray[float])->NDArray[float]:
+	"""
+	Computes terminal logFC for curves.
+
+	Parameters
+	----------
+	dx:	numpy.ndarray(shape=(n,))
+		X coordinates 
+	dy:	numpy.ndarray(shape=(ny,n))
+		Y coordinates, one for each y curve
+
+	Returns
+	-------
+	numpy.ndarray(shape=(ny,))
+		Terminal logFCs
+	"""
+	if len(dx)<2 or not (dx[1:]>dx[:-1]).all():
+		raise ValueError('dx must be increasing and have at least 2 values.')
+	return dy[:,-1]-dy[:,0]
+
+def compute_curve_characteristics(
+    dictys_dynamic_object,
+    start: int,
+    stop: int,
+    num: int = 100,
+    dist: float = 1.5,
+    mode: str = "regulation",
+    sparsity: float = 0.01,
+) -> pd.DataFrame:
+    """
+    Compute curve characteristics for one branch. 
+    Switching time, Terminal logFC, Transient logFC per TF
+    """
+    dcurve, dtime = compute_curves(dictys_dynamic_object, start, stop, num, dist, mode, sparsity)
+    charlist={
+		'Terminal logFC':_dynamic_network_char_terminal_logfc_,
+		'Transient logFC':_dynamic_network_char_transient_logfc_,
+		'Switching time':_dynamic_network_char_switching_time_,
+	}
+	#Compute curve characteristics
+    dchar={}
+    for xj in charlist:
+        dchar[xj]=charlist[xj](dtime.values,dcurve.values)
+    dchar=pd.DataFrame.from_dict(dchar)
+    dchar.set_index(dcurve.index,inplace=True,drop=True)
+    return dchar
+
+##################################### LF + DyGRN ############################################
 
 def intersect_grn_edges_with_lf(dictys_dynamic_object, lf_genes):
     """
@@ -407,6 +523,7 @@ def intersect_grn_edges_with_lf(dictys_dynamic_object, lf_genes):
     return tf_target_pairs
 
 ##################################### Plotting ############################################
+
 def fig_regulation_heatmap(
     network: dictys.net.dynamic_network,
     start: int,
