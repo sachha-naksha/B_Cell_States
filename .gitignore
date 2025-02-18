@@ -1,4 +1,5 @@
 multiome_dynamic_regulation/tutorial_notebooks/
+multiome_dynamic_regulation/py_scripts/analysis/cache_directory
 perturb_seq_gears/
 pseudotime_methods/
 *.log

@@ -11,10 +11,9 @@ import pandas as pd
 from joblib import Memory
 
 PATH_TO_CELL_LABELS = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/data/clusters.csv"
-
-# To-Do: Create a retrieval class with all functions to retrieve indices, names, weights, etc.
-#caches the dynamic object on disk as it is a large file, and needs to be loaded for every run
+# keep the object cached for the node tunnel job
 memory = Memory(location='cache_directory', verbose=0)
+
 @memory.cache 
 def load_dynamic_object(dynamic_object_path):
     """
@@ -222,6 +221,43 @@ def get_one_hop_grn_weights(dictys_dynamic_object, tf_indices=None, gene_indices
     combined_weights = np.where(final_sparsity_mask[:, :, np.newaxis], combined_weights, 0)
     return combined_weights, final_sparsity_mask, all_tf_indices
 
+from multiprocessing import Pool
+from functools import partial
+
+def _process_subset(subset: int, tmp_dynamic_dir: str) -> float:
+    """
+    Helper function to process a single subset and extract PAX5->RUNX2 edge weight
+    """
+    linking_file = f"{tmp_dynamic_dir}/Subset{subset}/linking.tsv.gz"
+    linking = pd.read_csv(linking_file, header=0, index_col=None, sep='\t', compression='gzip')
+    pax5_runx2_edge_weight = linking.loc[linking['Unnamed: 0'] == 'PAX5', 'RUNX2'].values[0]
+    return pax5_runx2_edge_weight
+
+def pax5_runx2_chromatin_grn(tmp_dynamic_dir: str, n_cores: int = None) -> list:
+    """
+    Get the chromatin GRN edge weight (stat) for PAX5->RUNX2 regulation and save to list.
+    Parallelized version using multiple CPU cores.
+    
+    Args:
+        tmp_dynamic_dir: Directory containing subset folders
+        n_cores: Number of CPU cores to use. If None, uses all available cores.
+    
+    Returns:
+        List of edge weights across all subsets.
+    """
+    # If n_cores is None, use all available cores
+    if n_cores is None:
+        n_cores = os.cpu_count()
+    
+    # Create partial function with fixed tmp_dynamic_dir
+    process_subset_partial = partial(_process_subset, tmp_dynamic_dir=tmp_dynamic_dir)
+    
+    # Create pool of workers and process subsets in parallel
+    with Pool(processes=n_cores) as pool:
+        edge_weights = pool.map(process_subset_partial, range(1, 195))
+    
+    return edge_weights
+    
 ##################################### Similarity metrics ############################################
 
 def get_sign_switching_pairs(pb_weights, gc_weights, tf_names, target_names, 
@@ -297,7 +333,7 @@ def get_sign_switching_pairs(pb_weights, gc_weights, tf_names, target_names,
         })
     return filtered_pairs, pair_scores, pair_metrics
 
-##################################### Utils ############################################
+##################################### Window labels ############################################
 
 def get_state_labels_in_window(dictys_dynamic_object, cell_labels):
     """
@@ -347,35 +383,7 @@ def get_top_k_fraction_labels(dictys_dynamic_object, window_idx, cell_labels, k=
                          reverse=True)
     return sorted_states[:k]
 
-def compute_curves(
-    dictys_dynamic_object,
-    start: int,
-    stop: int,
-    num: int = 100,
-    dist: float = 1.5,
-    mode: str = "regulation",
-    sparsity: float = 0.01,
-) -> pd.DataFrame:
-    """
-    Compute curves for one branch.
-    """
-    pts, fsmooth = dictys_dynamic_object.linspace(start, stop, num, dist)
-    if mode == "regulation":
-        # Log number of targets
-        stat1_net = fsmooth(stat.net(dictys_dynamic_object))
-        stat1_netbin = stat.fbinarize(stat1_net, sparsity=sparsity)
-        stat1_y = stat.flnneighbor(stat1_netbin)
-    elif mode == "expression":
-        stat1_y = fsmooth(stat.lcpm(dictys_dynamic_object, cut=0))
-    else:
-        raise ValueError(f"Unknown mode {mode}.")
-    # Pseudo time
-    stat1_x = stat.pseudotime(dictys_dynamic_object, pts)
-    tmp_y = stat1_y.compute(pts)
-    tmp_x = stat1_x.compute(pts)
-    dy = pd.DataFrame(tmp_y, index=stat1_y.names[0])
-    dx = pd.Series(tmp_x[0]) #first gene's pseudotime is taken as all genes have the same pseudotime
-    return dy, dx
+##################################### Curve computation ############################################
 
 def auc(dx:NDArray[float],dy:NDArray[float])->NDArray[float]:
 	"""
@@ -464,26 +472,17 @@ def _dynamic_network_char_terminal_logfc_(dx:NDArray[float],dy:NDArray[float])->
 		raise ValueError('dx must be increasing and have at least 2 values.')
 	return dy[:,-1]-dy[:,0]
 
-def compute_curve_characteristics(
-    dictys_dynamic_object,
-    start: int,
-    stop: int,
-    num: int = 100,
-    dist: float = 1.5,
-    mode: str = "regulation",
-    sparsity: float = 0.01,
-) -> pd.DataFrame:
+def compute_curve_characteristics(dcurve,dtime):
     """
     Compute curve characteristics for one branch. 
     Switching time, Terminal logFC, Transient logFC per TF
     """
-    dcurve, dtime = compute_curves(dictys_dynamic_object, start, stop, num, dist, mode, sparsity)
     charlist={
 		'Terminal logFC':_dynamic_network_char_terminal_logfc_,
 		'Transient logFC':_dynamic_network_char_transient_logfc_,
 		'Switching time':_dynamic_network_char_switching_time_,
 	}
-	#Compute curve characteristics
+    #Compute curve characteristics
     dchar={}
     for xj in charlist:
         dchar[xj]=charlist[xj](dtime.values,dcurve.values)
@@ -491,7 +490,90 @@ def compute_curve_characteristics(
     dchar.set_index(dcurve.index,inplace=True,drop=True)
     return dchar
 
-##################################### LF + DyGRN ############################################
+def rank_TF_dynamics(self,start:int,stop:int,num:int=100,dist:float=1.5,mode:str='regulation',sparsity:float=0.01,ntops:Tuple[int,int,int,int]=(8,8,4,4)):
+    """
+    Draws TF discovery plots for one branch.
+
+    Parameters
+    ----------
+    start:
+        Branch starting node ID 
+    stop:
+        Branch ending node ID 
+    num:
+        Number of points from starting to ending nodes to draw
+    dist:
+        Gaussian kernel smoothing distance/length scale between cells. Larger value means stronger smoothing.
+    mode:
+        Mode or measure to discover TFs. Accepts:
+
+        * 'regulation': based on target count
+
+        * 'weighted_regulation': based on weighted outdegree without the need to binarize network
+
+        * 'expression': based on CPM
+
+    sparsity:
+        The number of edges to regard as positive when binarizing network. Function depends on mode:
+        
+        * For mode='regulation': effective
+
+        * For mode='weighted_regulation': determines the overall scale of outdegree to be comparable with a binarized network of the specified sparsity
+        
+        * for mode='expression': no effect
+    ntops:
+        Number of top TFs to retrieve for activating, inactivating, transient up, and transient down patterns separately.
+        Tuple of 4 integers:
+        * First: Number of top activating TFs to retrieve
+        * Second: Number of top inactivating TFs to retrieve  
+        * Third: Number of top transient up TFs to retrieve
+        * Fourth: Number of top transient down TFs to retrieve
+    """
+    pts,fsmooth=self.linspace(start,stop,num,dist)
+    if mode=='regulation':
+        #Log number of targets
+        stat1_net=fsmooth(stat.net(self))
+        stat1_netbin=stat.fbinarize(stat1_net,sparsity=sparsity)
+        stat1_y=stat.flnneighbor(stat1_netbin)
+    elif mode=='weighted_regulation':
+        #Log weighted outdegree
+        stat1_net=fsmooth(stat.net(self))
+        stat1_y=stat.flnneighbor(stat1_net,weighted_sparsity=sparsity)
+    elif mode=='expression':
+        stat1_y=fsmooth(stat.lcpm(self,cut=0))
+    elif mode=='TF_expression':
+        stat1_y=fsmooth(stat.lcpm_tf(self,cut=0))
+    else:
+        raise ValueError(f'Unknown mode {mode}.')
+    #Pseudo time
+    stat1_x=stat.pseudotime(self,pts)
+    dcurve=pd.DataFrame(stat1_y.compute(pts),index=stat1_y.names[0])
+    dtime=pd.Series(stat1_x.compute(pts)[0]) #gene1's pseudotime is used as all genes have the same pseudotime
+    #Compute curve characteristics
+    dchar=compute_curve_characteristics(dcurve,dtime)
+    #Parameters for 4 plots
+    ans=[]
+    if ntops[0]>0:
+        #Activating
+        t1=dchar.sort_values('Terminal logFC',ascending=False).index[:ntops[0]]
+        t1=dchar.loc[t1].sort_values('Switching time').index
+        ans.append([[dcurve.loc[t1],dchar.loc[t1][['Switching time','Terminal logFC']]],dict(dtime=dtime)])
+    if ntops[1]>0:
+        #Inactivating
+        t1=dchar.sort_values('Terminal logFC',ascending=True).index[:ntops[1]]
+        t1=dchar.loc[t1].sort_values('Switching time').index
+        ans.append([[dcurve.loc[t1],dchar.loc[t1][['Switching time','Terminal logFC']]],dict(dtime=dtime)])
+    if ntops[2]>0:
+        #Transient up
+        t1=dchar.sort_values('Transient logFC',ascending=False).index[:ntops[2]]
+        ans.append([[dcurve.loc[t1],dchar.loc[t1][['Transient logFC','Terminal logFC']]],dict(dtime=dtime)])
+    if ntops[3]>0:
+        #Transient down
+        t1=dchar.sort_values('Transient logFC',ascending=True).index[:ntops[3]]
+        ans.append([[dcurve.loc[t1],dchar.loc[t1][['Transient logFC','Terminal logFC']]],dict(dtime=dtime)])
+    return ans
+
+#################################### LF + DyGRN ############################################
 
 def intersect_grn_edges_with_lf(dictys_dynamic_object, lf_genes):
     """
@@ -812,7 +894,11 @@ def fig_expression_gradient_heatmap(
     Draws pseudo-time dependent heatmap of expression gradients.
     """
     # Get expression data
-    dy, dx = compute_chars(network, start, stop, num, dist, mode='expression')
+    pts,fsmooth=network.linspace(start,stop,num,dist)
+    stat1_y=fsmooth(stat.lcpm(network,cut=0))
+    stat1_x=stat.pseudotime(network,pts)
+    dy=pd.DataFrame(stat1_y.compute(pts),index=stat1_y.names[0])
+    dx=pd.Series(stat1_x.compute(pts)[0]) #gene1's pseudotime is used as all genes have the same pseudotime
     # Determine if input is gene list or regulation list
     if isinstance(genes_or_regulations[0], tuple):
         # Extract target genes from regulations
@@ -833,8 +919,6 @@ def fig_expression_gradient_heatmap(
         fig = plt.figure(figsize=figsize)
         ax = fig.add_subplot(111)
     else:
-        if figsize is not None:
-            raise ValueError("figsize should not be set if ax is set.")
         fig = ax.get_figure()
         figsize = fig.get_size_inches()
     aspect = (figsize[1] / len(target_genes)) / (figsize[0] / gradients.shape[1])
@@ -865,101 +949,23 @@ def fig_expression_gradient_heatmap(
     ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
     return fig, ax, cmap 
 
-def fig_expression_heatmap(
-    network: dictys.net.dynamic_network,
-    start: int,
-    stop: int,
-    genes_or_regulations: Union[list[str], list[Tuple[str, str]]],
-    num: int = 100,
-    dist: float = 1.5,
-    ax: Optional[matplotlib.axes.Axes] = None,
-    cmap: Union[str, matplotlib.cm.ScalarMappable] = "coolwarm",
-    figsize: Tuple[float, float] = (2, 0.15)
-) -> Tuple[matplotlib.pyplot.Figure, matplotlib.axes.Axes, matplotlib.cm.ScalarMappable]:
-    """
-    Draws pseudo-time dependent heatmap of expression values.
-    """
-    # Get expression data
-    dy, dx = compute_chars(network, start, stop, num, dist, mode='expression')
-    
-    # Determine if input is gene list or regulation list
-    if isinstance(genes_or_regulations[0], tuple):
-        # Extract target genes from regulations
-        target_genes = [target for _, target in genes_or_regulations]
-        # Remove duplicates while preserving order
-        target_genes = list(dict.fromkeys(target_genes))
-    else:
-        # Use gene list directly
-        target_genes = list(dict.fromkeys(genes_or_regulations))
-    
-    # Get expression values for target genes (instead of gradients)
-    expressions = np.vstack([
-        dy.loc[gene].values
-        for gene in target_genes
-    ])
-    
-    # Create figure and axes
-    if ax is None:
-        figsize = (figsize[0], figsize[1] * len(target_genes))
-        fig = plt.figure(figsize=figsize)
-        ax = fig.add_subplot(111)
-    else:
-        if figsize is not None:
-            raise ValueError("figsize should not be set if ax is set.")
-        fig = ax.get_figure()
-        figsize = fig.get_size_inches()
-    
-    aspect = (figsize[1] / len(target_genes)) / (figsize[0] / expressions.shape[1])
-    
-    # Determine and apply colormap
-    if isinstance(cmap, str):
-        vmax = np.quantile(np.abs(expressions).ravel(), 0.95)
-        cmap = matplotlib.cm.ScalarMappable(
-            norm=matplotlib.colors.Normalize(vmin=-vmax, vmax=vmax), 
-            cmap=cmap
-        )
-    
-    if hasattr(cmap, "to_rgba"):
-        im = ax.imshow(cmap.to_rgba(expressions), aspect=aspect, interpolation='none')
-    else:
-        im = ax.imshow(expressions, aspect=aspect, interpolation='none', cmap=cmap)
-        plt.colorbar(im, label="Expression (Log CPM)")  # Updated label
-    
-    # Set pseudotime labels as x axis labels
-    ax.set_xlabel("Pseudotime")
-    num_ticks = 10
-    tick_positions = np.linspace(0, expressions.shape[1] - 1, num_ticks, dtype=int)
-    tick_labels = dx.iloc[tick_positions]
-    ax.set_xticks(tick_positions)
-    ax.set_xticklabels([f"{x:.6f}" for x in tick_labels], rotation=45, ha="right")
-    
-    # Set target gene labels
-    ax.set_yticks(list(range(len(target_genes))))
-    ax.set_yticklabels(target_genes)
-    
-    # Add grid lines to separate rows
-    ax.set_yticks(np.arange(len(target_genes) + 1) - 0.5, minor=True)
-    ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
-    
-    return fig, ax, cmap
-
 if __name__ == "__main__":
-
-    data_file = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output/dynamic.h5'
-    #lf_dir = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/other_files/latent_factors'
+    # file_name='/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output/dynamic.h5'
     output_folder = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output'
-    dictys_dynamic_object = load_dynamic_object(data_file)
-    print('loaded dynamic object')
-    tf_list = ['PRDM1', 'IRF4', 'SPIB', 'BATF']
-    while True:
-        try:
-            weights, _, _ = get_grn_weights_for_tfs(dictys_dynamic_object, tf_list)
-            print('Function call successful')
-            print(weights.shape)
-            break  # Exit loop if successful
-        except Exception as e:
-            print(f"Error in function call: {e}")
-            # Optionally, add a prompt to continue or fix the code
-            input("Press Enter to try again after fixing the issue...")
-    
+    # dictys_dynamic_object = load_dynamic_object(file_name)
+    # print('loaded dynamic object')
+    # while True:
+    #     try:
+    #         pb_TF_ranks_expression = rank_TF_dynamics(dictys_dynamic_object, 0, 2, num=100, dist=0.0005, mode='TF_expression', sparsity=0.01, ntops=(50,50,50,50))
+    #         break  # Exit loop if successful
+    #     except Exception as e:
+    #         print(f"Error in function call: {e}")
+    #         # Optionally, add a prompt to continue or fix the code
+    #         input("Press Enter to try again after fixing the issue...")
+    tmp_dynamic_dir = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/tmp_dynamic"
+    edge_weights = pax5_runx2_chromatin_grn(tmp_dynamic_dir, n_cores=32)
+    #save edge_weights to a file np.array
+    edge_weights = np.array(edge_weights)
+    #save edge_weights to a file
+    np.save(f'{output_folder}/edge_weights.npy', edge_weights)
     print('Done')
