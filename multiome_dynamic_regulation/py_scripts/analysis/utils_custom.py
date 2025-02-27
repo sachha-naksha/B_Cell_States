@@ -385,6 +385,36 @@ def get_top_k_fraction_labels(dictys_dynamic_object, window_idx, cell_labels, k=
 
 ##################################### Curve computation ############################################
 
+def compute_expression_regulation_curves(
+    dictys_dynamic_object,
+    start: int,
+    stop: int,
+    num: int = 100,
+    dist: float = 1.5,
+    mode: str = "regulation",
+    sparsity: float = 0.01,
+) -> pd.DataFrame:
+    """
+    Compute typical expression and regulation curves for one branch.
+    """
+    pts, fsmooth = dictys_dynamic_object.linspace(start, stop, num, dist)
+    if mode == "regulation":
+        # Log number of targets
+        stat1_net = fsmooth(stat.net(dictys_dynamic_object))
+        stat1_netbin = stat.fbinarize(stat1_net, sparsity=sparsity)
+        stat1_y = stat.flnneighbor(stat1_netbin)
+    elif mode == "expression":
+        stat1_y = fsmooth(stat.lcpm(dictys_dynamic_object, cut=0))
+    else:
+        raise ValueError(f"Unknown mode {mode}.")
+    # Pseudo time
+    stat1_x = stat.pseudotime(dictys_dynamic_object, pts)
+    tmp_y = stat1_y.compute(pts)
+    tmp_x = stat1_x.compute(pts)
+    dy = pd.DataFrame(tmp_y, index=stat1_y.names[0])
+    dx = pd.Series(tmp_x[0]) #first gene's pseudotime is taken as all genes have the same pseudotime
+    return dy, dx
+
 def auc(dx:NDArray[float],dy:NDArray[float])->NDArray[float]:
 	"""
 	Computes area under the curves.
