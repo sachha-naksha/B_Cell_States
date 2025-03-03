@@ -59,15 +59,72 @@ def get_gene_indices(dictys_dynamic_object, gene_list):
             gene_indices.append(gene_hashmap[gene])
     return gene_indices
 
-def get_all_gene_names(dictys_dynamic_object):
+def check_if_gene_in_ndict(dictys_dynamic_object, gene_name, return_index=False):
     """
-    Get all possible target gene names from the dynamic object's ndict
+    Check if a gene is in the ndict of the dynamic object.
+    
+    Parameters
+    ----------
+    dictys_dynamic_object : DictysObject
+        The dictys dynamic object containing the ndict
+    gene_name : str or list
+        Gene name(s) to check. Can be a single gene name or a list of gene names
+    return_index : bool, optional
+        If True, returns the index of found genes in ndict. Default is False
+        
+    Returns
+    -------
+    If gene_name is str:
+        bool if return_index=False
+        int or None if return_index=True
+    If gene_name is list:
+        dict with results for each gene:
+        {
+            'present': list of found genes,
+            'missing': list of missing genes,
+            'indices': dict of gene:index (if return_index=True)
+        }
     """
-    # Get all gene names from ndict
-    gene_names = list(dictys_dynamic_object.ndict.keys())
-    gene_names.sort()  # Sort for consistency
-    return gene_names
-
+    # Input validation
+    if not hasattr(dictys_dynamic_object, 'ndict'):
+        raise AttributeError("Dynamic object does not have ndict attribute")
+    
+    # Handle single gene case
+    if isinstance(gene_name, str):
+        is_present = gene_name in dictys_dynamic_object.ndict
+        if return_index:
+            return dictys_dynamic_object.ndict.get(gene_name, None)
+        return is_present
+    
+    # Handle list of genes case
+    elif isinstance(gene_name, (list, tuple, set)):
+        results = {
+            'present': [],
+            'missing': [],
+            'indices': {} if return_index else None
+        }
+        
+        for gene in gene_name:
+            if gene in dictys_dynamic_object.ndict:
+                results['present'].append(gene)
+                if return_index:
+                    results['indices'][gene] = dictys_dynamic_object.ndict[gene]
+            else:
+                results['missing'].append(gene)
+                
+        # Add summary statistics
+        results['stats'] = {
+            'total_genes': len(gene_name),
+            'found': len(results['present']),
+            'missing': len(results['missing']),
+            'percent_found': (len(results['present']) / len(gene_name) * 100)
+        }
+        
+        return results
+    
+    else:
+        raise TypeError("gene_name must be a string or a list-like object of strings")
+    
 def get_pseudotime_of_windows(dictys_dynamic_object, window_indices):
     """
     Get the pseudotime of specific windows for x-axis in plots
@@ -522,7 +579,7 @@ def compute_curve_characteristics(dcurve,dtime):
 
 def rank_TF_dynamics(self,start:int,stop:int,num:int=100,dist:float=1.5,mode:str='regulation',sparsity:float=0.01,ntops:Tuple[int,int,int,int]=(8,8,4,4)):
     """
-    Draws TF discovery plots for one branch.
+    Returns ranked TFs for one branch.
 
     Parameters
     ----------
@@ -980,10 +1037,10 @@ def fig_expression_gradient_heatmap(
     return fig, ax, cmap 
 
 if __name__ == "__main__":
-    # file_name='/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output/dynamic.h5'
+    infile_name='/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output/dynamic.h5'
     output_folder = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output'
-    # dictys_dynamic_object = load_dynamic_object(file_name)
-    # print('loaded dynamic object')
+    dictys_dynamic_object = load_dynamic_object(infile_name)
+    print('loaded dynamic object')
     # while True:
     #     try:
     #         pb_TF_ranks_expression = rank_TF_dynamics(dictys_dynamic_object, 0, 2, num=100, dist=0.0005, mode='TF_expression', sparsity=0.01, ntops=(50,50,50,50))
@@ -992,10 +1049,4 @@ if __name__ == "__main__":
     #         print(f"Error in function call: {e}")
     #         # Optionally, add a prompt to continue or fix the code
     #         input("Press Enter to try again after fixing the issue...")
-    tmp_dynamic_dir = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/tmp_dynamic"
-    edge_weights = pax5_runx2_chromatin_grn(tmp_dynamic_dir, n_cores=32)
-    #save edge_weights to a file np.array
-    edge_weights = np.array(edge_weights)
-    #save edge_weights to a file
-    np.save(f'{output_folder}/edge_weights.npy', edge_weights)
     print('Done')
