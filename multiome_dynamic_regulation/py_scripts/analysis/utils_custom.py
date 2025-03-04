@@ -62,16 +62,7 @@ def get_gene_indices(dictys_dynamic_object, gene_list):
 def check_if_gene_in_ndict(dictys_dynamic_object, gene_name, return_index=False):
     """
     Check if a gene is in the ndict of the dynamic object.
-    
-    Parameters
-    ----------
-    dictys_dynamic_object : DictysObject
-        The dictys dynamic object containing the ndict
-    gene_name : str or list
-        Gene name(s) to check. Can be a single gene name or a list of gene names
-    return_index : bool, optional
-        If True, returns the index of found genes in ndict. Default is False
-        
+     
     Returns
     -------
     If gene_name is str:
