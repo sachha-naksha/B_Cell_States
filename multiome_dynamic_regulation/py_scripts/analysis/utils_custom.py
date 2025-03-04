@@ -662,34 +662,82 @@ def rank_TF_dynamics(self,start:int,stop:int,num:int=100,dist:float=1.5,mode:str
 
 #################################### LF + DyGRN ############################################
 
-def intersect_grn_edges_with_lf(dictys_dynamic_object, lf_genes):
+def classify_genes_by_expression_dynamics(dchar, ntops=(20,20,30,30)):
     """
-    Get 1-hop GRN edges for latent factor genes; remove sparse edges which show no regulatory activity across majority of cellular transitions
+    Classify genes based on effect size distributions, keeping only top N genes.
     """
-    # 1. Map the gene names in LF to indices (TF and target both)
-    lf_tf_indices, lf_tf_gene_indices, _ = get_tf_indices(dictys_dynamic_object, lf_genes)
-    lf_gene_indices = get_gene_indices(dictys_dynamic_object, lf_genes)
-
-    # 2. Get the one-hop GRN edges for the LF genes to increase TF nodes. (adjust for sparsity across all windows in this step)
-    weights, tf_target_edge_mask, target_one_hop_tf_nodes = get_one_hop_grn_weights(dictys_dynamic_object, lf_tf_indices, lf_gene_indices, window_indices=None, nonzero_fraction_threshold=0.3)
-    # 3. Create TF-Target names tuples list of all edges present in the final sparsity mask returned from step 2. (mapping indices back to name)
-    # Create reverse mapping once
-    idx_to_gene = {idx: gene for gene, idx in dictys_dynamic_object.ndict.items()}
-    # get indices of TFs and Targets from mask
-    tf_idx = tf_target_edge_mask[0]
-    target_gene_idx = tf_target_edge_mask[1]
-    # map tf indices to their gene indices
-    tf_gene_idx = dictys_dynamic_object.nids[0][tf_idx].item()
-    # map indices back to names
-    tf_names = [idx_to_gene[tf_gene_idx]]
-    target_names = [idx_to_gene[target_gene_idx]]
-    # output only the existing edges (pairs) in the sparsity mask
-    tf_target_pairs = []
-    for i in range(len(tf_names)):
-        for j in range(len(target_names)):
-            if tf_target_edge_mask[i, j]:  # Check if edge exists in sparsity mask
-                tf_target_pairs.append((tf_names[i], target_names[j]))
-    return tf_target_pairs
+    # Min-max scaling for Terminal and Transient logFC
+    normalized_dchar = dchar.copy()
+    # Scale Terminal logFC
+    terminal_abs = np.abs(dchar['Terminal logFC'])
+    terminal_min = terminal_abs.min()
+    terminal_max = terminal_abs.max()
+    normalized_dchar['Terminal logFC'] = (terminal_abs - terminal_min) / (terminal_max - terminal_min)
+    normalized_dchar['Terminal logFC'] *= np.sign(dchar['Terminal logFC'])
+    # Scale Transient logFC
+    transient_abs = np.abs(dchar['Transient logFC'])
+    transient_min = transient_abs.min()
+    transient_max = transient_abs.max()
+    normalized_dchar['Transient logFC'] = (transient_abs - transient_min) / (transient_max - transient_min)
+    normalized_dchar['Transient logFC'] *= np.sign(dchar['Transient logFC'])
+    # Initialize dictionaries
+    classifications = {
+        'up_regulated': [],
+        'transient_up': [],
+        'down_regulated': [],
+        'transient_down': []
+    }
+    effect_sizes = {
+        'up_regulated': {},
+        'transient_up': {},
+        'down_regulated': {},
+        'transient_down': {}
+    }
+    # Classify genes using normalized values
+    for idx, row in normalized_dchar.iterrows():
+        terminal = row['Terminal logFC']
+        transient = row['Transient logFC']
+        if abs(terminal) < 1e-10 and abs(transient) < 1e-10:
+            continue
+        if abs(terminal) >= abs(transient):
+            if terminal > 0:
+                classifications['up_regulated'].append(idx)
+                effect_sizes['up_regulated'][idx] = abs(terminal)
+            else:
+                classifications['down_regulated'].append(idx)
+                effect_sizes['down_regulated'][idx] = abs(terminal)
+        else:
+            if transient > 0:
+                classifications['transient_up'].append(idx)
+                effect_sizes['transient_up'][idx] = abs(transient)
+            else:
+                classifications['transient_down'].append(idx)
+                effect_sizes['transient_down'][idx] = abs(transient)
+    # Sort and keep top N genes
+    sorted_classifications = {}
+    percentiles_used = {}
+    # Map categories to their ntops value
+    category_ntops = {
+        'up_regulated': ntops[0],
+        'transient_up': ntops[1],
+        'down_regulated': ntops[2],
+        'transient_down': ntops[3]
+    }
+    for category in classifications:
+        if len(effect_sizes[category]) == 0:
+            sorted_classifications[category] = []
+            percentiles_used[category] = None
+            continue
+        # Sort genes by effect size
+        sorted_genes = sorted(effect_sizes[category].items(), key=lambda x: x[1], reverse=True)
+        # Take top N genes
+        n_keep = min(category_ntops[category], len(sorted_genes))
+        sorted_classifications[category] = [gene for gene, _ in sorted_genes[:n_keep]]
+        # Calculate effective percentile
+        if n_keep > 0:
+            effective_percentile = 100 * (1 - n_keep / len(effect_sizes[category]))
+            percentiles_used[category] = effective_percentile
+    return sorted_classifications, percentiles_used
 
 ##################################### Plotting ############################################
 
@@ -1036,17 +1084,81 @@ def fig_expression_gradient_heatmap(
     ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
     return fig, ax, cmap 
 
-if __name__ == "__main__":
-    infile_name='/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output/dynamic.h5'
-    output_folder = '/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output'
-    dictys_dynamic_object = load_dynamic_object(infile_name)
-    print('loaded dynamic object')
-    # while True:
-    #     try:
-    #         pb_TF_ranks_expression = rank_TF_dynamics(dictys_dynamic_object, 0, 2, num=100, dist=0.0005, mode='TF_expression', sparsity=0.01, ntops=(50,50,50,50))
-    #         break  # Exit loop if successful
-    #     except Exception as e:
-    #         print(f"Error in function call: {e}")
-    #         # Optionally, add a prompt to continue or fix the code
-    #         input("Press Enter to try again after fixing the issue...")
-    print('Done')
+def fig_clustered_expression_gradient_heatmap(
+    network: dictys.net.dynamic_network,
+    start: int,
+    stop: int,
+    genes_or_regulations: Union[list[str], list[Tuple[str, str]]],
+    dchar: pd.DataFrame,  
+    num: int = 100,
+    dist: float = 0.0005,
+    cmap: str = "RdYlGn",
+    figsize: Optional[Tuple[float, float]] = None,
+    dright: float = 0.3
+) -> Tuple[plt.Figure, np.ndarray, list]:
+    """
+    Draws heatmap of expression gradients, ordering genes by their switching times.
+    """
+    # Get expression data
+    pts, fsmooth = network.linspace(start, stop, num, dist)
+    stat1_y = fsmooth(stat.lcpm(network, cut=0))
+    stat1_x = stat.pseudotime(network, pts)
+    dy = pd.DataFrame(stat1_y.compute(pts), index=stat1_y.names[0])
+    dx = pd.Series(stat1_x.compute(pts)[0])
+    # Extract and deduplicate target genes
+    if isinstance(genes_or_regulations[0], tuple):
+        target_genes = [target for _, target in genes_or_regulations]
+    else:
+        target_genes = genes_or_regulations
+    # Remove duplicates while preserving order
+    seen = set()
+    target_genes = [x for x in target_genes if not (x in seen or seen.add(x))]
+    # Calculate gradients
+    gradients_list = [np.gradient(dy.loc[gene].values, dx.values) for gene in target_genes]
+    gradients = np.vstack(gradients_list)
+    # Sort genes by switching time, but maintain correct order mapping
+    switching_times = dchar.loc[target_genes]['Switching time']
+    sorted_indices = switching_times.sort_values().index
+    ordered_genes = list(dict.fromkeys(sorted_indices))  # Remove duplicates while preserving order
+    # Create a mapping from gene names to their positions in target_genes
+    gene_to_idx = {gene: idx for idx, gene in enumerate(target_genes)}
+    # Reorder gradients using the mapping
+    gradients = gradients[[gene_to_idx[gene] for gene in ordered_genes]]
+    # Set up the figure
+    if figsize is None:
+        figsize = (10, len(target_genes) * 0.3)
+    fig = plt.figure(figsize=figsize)
+    # Calculate margins
+    left_margin = 0.3  # For gene names
+    right_margin = dright  # For colorbar
+    bottom_margin = 0.1  # For pseudotime label
+    top_margin = 0.05
+    # Create main heatmap axes
+    ax_heatmap = fig.add_axes([left_margin, bottom_margin, 
+                              1 - left_margin - right_margin - 0.1, 
+                              1 - bottom_margin - top_margin])
+    # Calculate symmetric vmin/vmax for colormap
+    vmax = np.max(np.abs(gradients))
+    vmin = -vmax
+    # Create heatmap
+    im = ax_heatmap.imshow(gradients, 
+                          aspect='auto',
+                          cmap=cmap,
+                          interpolation='nearest',
+                          vmin=vmin,
+                          vmax=vmax)
+    # Add gene labels
+    ax_heatmap.set_yticks(range(len(ordered_genes)))
+    ax_heatmap.set_yticklabels(ordered_genes)
+    # Remove x-axis ticks but keep label
+    ax_heatmap.set_xticks([])
+    ax_heatmap.set_xlabel("Pseudotime", fontsize=10, labelpad=10)
+    # Add colorbar
+    cax = fig.add_axes([1 - right_margin + 0.02, bottom_margin, 
+                        0.02, 1 - bottom_margin - top_margin])
+    fig.colorbar(im, cax=cax, label='Expression gradient')
+    # Adjust layout
+    plt.tight_layout()
+    return fig, gradients, ordered_genes
+
+
