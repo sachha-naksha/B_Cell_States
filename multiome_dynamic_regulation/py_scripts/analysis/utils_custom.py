@@ -580,41 +580,6 @@ def compute_curve_characteristics(dcurve,dtime):
 def rank_TF_dynamics(self,start:int,stop:int,num:int=100,dist:float=1.5,mode:str='regulation',sparsity:float=0.01,ntops:Tuple[int,int,int,int]=(8,8,4,4)):
     """
     Returns ranked TFs for one branch.
-
-    Parameters
-    ----------
-    start:
-        Branch starting node ID 
-    stop:
-        Branch ending node ID 
-    num:
-        Number of points from starting to ending nodes to draw
-    dist:
-        Gaussian kernel smoothing distance/length scale between cells. Larger value means stronger smoothing.
-    mode:
-        Mode or measure to discover TFs. Accepts:
-
-        * 'regulation': based on target count
-
-        * 'weighted_regulation': based on weighted outdegree without the need to binarize network
-
-        * 'expression': based on CPM
-
-    sparsity:
-        The number of edges to regard as positive when binarizing network. Function depends on mode:
-        
-        * For mode='regulation': effective
-
-        * For mode='weighted_regulation': determines the overall scale of outdegree to be comparable with a binarized network of the specified sparsity
-        
-        * for mode='expression': no effect
-    ntops:
-        Number of top TFs to retrieve for activating, inactivating, transient up, and transient down patterns separately.
-        Tuple of 4 integers:
-        * First: Number of top activating TFs to retrieve
-        * Second: Number of top inactivating TFs to retrieve  
-        * Third: Number of top transient up TFs to retrieve
-        * Fourth: Number of top transient down TFs to retrieve
     """
     pts,fsmooth=self.linspace(start,stop,num,dist)
     if mode=='regulation':
