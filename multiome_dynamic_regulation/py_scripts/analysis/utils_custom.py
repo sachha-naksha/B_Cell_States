@@ -1117,4 +1117,84 @@ def fig_clustered_expression_gradient_heatmap(
     plt.tight_layout()
     return fig, gradients, ordered_genes
 
+def fig_expression_linear_heatmap(
+    network: dictys.net.dynamic_network,
+    start: int,
+    stop: int,
+    genes_or_regulations: Union[list[str], list[Tuple[str, str]]],
+    num: int = 100,
+    dist: float = 1.5,
+    ax: Optional[matplotlib.axes.Axes] = None,
+    cmap: Union[str, matplotlib.cm.ScalarMappable] = "coolwarm",
+    figsize: Tuple[float, float] = (2, 0.15)
+) -> Tuple[matplotlib.pyplot.Figure, matplotlib.axes.Axes, matplotlib.cm.ScalarMappable]:
+    """
+    Draws pseudo-time dependent heatmap of linear expression values.
+    """
+    # Get expression data
+    pts, fsmooth = network.linspace(start, stop, num, dist)
+    stat1_y = fsmooth(stat.lcpm(network, cut=0))
+    stat1_x = stat.pseudotime(network, pts)
+    
+    # Get log2 expression values and convert to linear
+    dy = pd.DataFrame(stat1_y.compute(pts), index=stat1_y.names[0])
+    dx = pd.Series(stat1_x.compute(pts)[0])
+    dy_linear = dy.apply(lambda x: 2**x - 1)
+    
+    # Get target genes
+    if isinstance(genes_or_regulations[0], tuple):
+        target_genes = [target for _, target in genes_or_regulations]
+        target_genes = list(dict.fromkeys(target_genes))
+    else:
+        target_genes = list(dict.fromkeys(genes_or_regulations))
+    
+    # Stack expression values
+    expression_matrix = np.vstack([
+        dy_linear.loc[gene].values 
+        for gene in target_genes
+    ])
+    
+    # Create figure and axes
+    if ax is None:
+        figsize = (figsize[0], figsize[1] * len(target_genes))
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111)
+    else:
+        fig = ax.get_figure()
+        figsize = fig.get_size_inches()
+    
+    aspect = (figsize[1] / len(target_genes)) / (figsize[0] / expression_matrix.shape[1])
+    
+    # Create heatmap
+    if isinstance(cmap, str):
+        vmax = np.quantile(expression_matrix.ravel(), 0.95)
+        cmap = matplotlib.cm.ScalarMappable(
+            norm=matplotlib.colors.Normalize(vmin=0, vmax=vmax), 
+            cmap=cmap
+        )
+    
+    if hasattr(cmap, "to_rgba"):
+        im = ax.imshow(cmap.to_rgba(expression_matrix), aspect=aspect, interpolation='none')
+    else:
+        im = ax.imshow(expression_matrix, aspect=aspect, interpolation='none', cmap=cmap)
+        plt.colorbar(im, label="Expression (CPM)")
+    
+
+    # Set pseudotime labels with rounded values
+    ax.set_xlabel("Pseudotime")
+    num_ticks = 10
+    tick_positions = np.linspace(0, expression_matrix.shape[1] - 1, num_ticks, dtype=int)
+    tick_labels = dx.iloc[tick_positions]
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels([f"{x:.3f}" for x in tick_labels], rotation=45, ha="right")  # Round to 1 decimal place
+    
+    # Set gene labels
+    ax.set_yticks(list(range(len(target_genes))))
+    ax.set_yticklabels(target_genes)
+    
+    # Add grid lines
+    ax.set_yticks(np.arange(len(target_genes) + 1) - 0.5, minor=True)
+    ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
+    
+    return fig, ax, cmap
 
