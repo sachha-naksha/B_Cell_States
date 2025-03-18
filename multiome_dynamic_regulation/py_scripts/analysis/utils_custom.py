@@ -2,19 +2,17 @@ import os
 from typing import Optional, Tuple, Union
 
 import dictys
-from dictys.utils.numpy import NDArray,ArrayLike
-from dictys.net import stat
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from dictys.net import stat
+from dictys.utils.numpy import ArrayLike, NDArray
 from joblib import Memory
 
-PATH_TO_CELL_LABELS = "/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/data/clusters.csv"
-# keep the object cached for the node tunnel job
-memory = Memory(location='cache_directory', verbose=0)
-
-@memory.cache 
+# keep the object cached for debugging
+memory = Memory(location="cache_directory", verbose=0)
+@memory.cache
 def load_dynamic_object(dynamic_object_path):
     """
     Load the dynamic object from the given path
@@ -22,7 +20,9 @@ def load_dynamic_object(dynamic_object_path):
     dynamic_object = dictys.net.dynamic_network.from_file(dynamic_object_path)
     return dynamic_object
 
+
 ######################### Indices retrieval #########################
+
 
 def get_tf_indices(dictys_dynamic_object, tf_list):
     """
@@ -62,270 +62,73 @@ def get_gene_indices(dictys_dynamic_object, gene_list):
 def check_if_gene_in_ndict(dictys_dynamic_object, gene_name, return_index=False):
     """
     Check if a gene is in the ndict of the dynamic object.
-     
-    Returns
-    -------
-    If gene_name is str:
-        bool if return_index=False
-        int or None if return_index=True
-    If gene_name is list:
-        dict with results for each gene:
-        {
-            'present': list of found genes,
-            'missing': list of missing genes,
-            'indices': dict of gene:index (if return_index=True)
-        }
     """
     # Input validation
-    if not hasattr(dictys_dynamic_object, 'ndict'):
+    if not hasattr(dictys_dynamic_object, "ndict"):
         raise AttributeError("Dynamic object does not have ndict attribute")
-    
     # Handle single gene case
     if isinstance(gene_name, str):
         is_present = gene_name in dictys_dynamic_object.ndict
         if return_index:
             return dictys_dynamic_object.ndict.get(gene_name, None)
         return is_present
-    
     # Handle list of genes case
     elif isinstance(gene_name, (list, tuple, set)):
         results = {
-            'present': [],
-            'missing': [],
-            'indices': {} if return_index else None
+            "present": [],
+            "missing": [],
+            "indices": {} if return_index else None,
         }
-        
         for gene in gene_name:
             if gene in dictys_dynamic_object.ndict:
-                results['present'].append(gene)
+                results["present"].append(gene)
                 if return_index:
-                    results['indices'][gene] = dictys_dynamic_object.ndict[gene]
+                    results["indices"][gene] = dictys_dynamic_object.ndict[gene]
             else:
-                results['missing'].append(gene)
-                
+                results["missing"].append(gene)
         # Add summary statistics
-        results['stats'] = {
-            'total_genes': len(gene_name),
-            'found': len(results['present']),
-            'missing': len(results['missing']),
-            'percent_found': (len(results['present']) / len(gene_name) * 100)
+        results["stats"] = {
+            "total_genes": len(gene_name),
+            "found": len(results["present"]),
+            "missing": len(results["missing"]),
+            "percent_found": (len(results["present"]) / len(gene_name) * 100),
         }
-        
         return results
-    
     else:
         raise TypeError("gene_name must be a string or a list-like object of strings")
-    
-def get_pseudotime_of_windows(dictys_dynamic_object, window_indices):
-    """
-    Get the pseudotime of specific windows for x-axis in plots
-    """
-    pseudotime_relative_to_bifurcation = dictys_dynamic_object.point[
-        "s"
-    ].locs  # Access via dictionary keys
-    branch_pseudotime = [
-        float(pseudotime_relative_to_bifurcation[idx]) for idx in window_indices
-    ]
-    return branch_pseudotime
 
-######################### Edge weights retrieval #########################
 
-def get_grn_weights_for_tfs(dictys_dynamic_object, tf_names=None, window_indices=None, nonzero_fraction_threshold=0.1):
-    """
-    Get the weights matrix for specified TFs over specific windows, masking out sparse edges.
-    """
-    # Get the global GRN weights array
-    global_grn_weights = dictys_dynamic_object.prop["es"]["w_n"]
-    # Calculate non-zero fractions across all windows for all TFs
-    nonzero_edge_fraction_matrix = np.mean(global_grn_weights != 0, axis=2)  # shape: (n_tfs, n_targets)
-    # Create sparsity mask
-    sparsity_mask = nonzero_edge_fraction_matrix >= nonzero_fraction_threshold  # shape: (n_tfs, n_targets)
-    # Get the indices of the queried TFs
-    queried_tf_indices, _, missing_tfs = get_tf_indices(dictys_dynamic_object, tf_names)
-    # Convert indices to numpy arrays and ensure they're integers
-    queried_tf_indices = np.array(queried_tf_indices, dtype=int) if queried_tf_indices is not None else np.array([], dtype=int)
-    # Use all windows if none are specified
-    window_indices = list(range(global_grn_weights.shape[2])) if window_indices is None else window_indices
-    # Extract weights for specified TFs and windows
-    sliced_weights = global_grn_weights[queried_tf_indices, :, :]  # shape: (n_selected_tfs, n_targets, n_windows)
-    sliced_weights = sliced_weights[:, :, window_indices]  # Select specific windows
-    # Apply sparsity mask to set sparse edges to zero
-    masked_weights = np.where(sparsity_mask[queried_tf_indices, :, np.newaxis], sliced_weights, 0)
-    return masked_weights, queried_tf_indices, missing_tfs
-
-def get_grn_weights_for_windows(dictys_dynamic_object, window_indices=None, nonzero_fraction_threshold=0.1):
-    """
-    Get the weights matrix for specified TFs over specific windows
-    """
-    # Get the weights array
-    global_grn_weights = dictys_dynamic_object.prop["es"]["w_n"]
-    # Calculate non-zero fractions across time for the specified TFs
-    nonzero_edge_fraction = np.mean(global_grn_weights != 0, axis=2)  # shape: (n_selected_tfs, n_targets)
-    # Create sparsity mask
-    sparsity_mask = nonzero_edge_fraction >= nonzero_fraction_threshold  # shape: (n_selected_tfs, n_targets)
-    # Convert indices to numpy arrays and ensure they're integers
-    window_indices = list(range(global_grn_weights.shape[2])) if window_indices is None else window_indices
-    # Extract weights for specified windows
-    weights = global_grn_weights[:, :, window_indices]
-    # Apply sparsity mask
-    masked_weights = np.where(sparsity_mask[:, :, np.newaxis], weights, 0)
-    active_links = np.any(masked_weights != 0, axis=2)  # shape: (n_selected_tfs, n_selected_targets)
-    # Get indices of active TFs and targets
-    active_tf_idx = np.any(active_links, axis=1)  # TFs with at least one target
-    active_target_idx = np.any(active_links, axis=0)  # Targets with at least one TF
-    # Filter weights to keep only active links
-    filtered_weights = masked_weights[active_tf_idx][:, active_target_idx, :]
-    return filtered_weights, active_tf_idx, active_target_idx
-
-def get_indirect_grn_weights_for_tfs(
-    dictys_dynamic_object, tf_names=None, window_indices=None, nonzero_fraction_threshold=0.1
-):
-    """
-    Get the indirect weights of TFs over specific windows for x-axis in plots
-    """
-    # Get the weights array
-    global_grn_weights = dictys_dynamic_object.prop["es"]["w_in"]
-    # Apply sparsity filter to global GRN first
-    nonzero_edge_fraction_across_pseudotime = (global_grn_weights != 0).mean(axis=2)  # mean of a boolean, shape is total TFs x total targets
-    sparsity_mask = nonzero_edge_fraction_across_pseudotime >= nonzero_fraction_threshold
-    # get the indices of the TFs
-    tf_indices, _, missing_tfs = get_tf_indices(dictys_dynamic_object, tf_names)
-    # Convert indices to lists if they're not already
-    tf_indices = list(tf_indices) if tf_indices is not None else []
-    window_indices = list(range(global_grn_weights.shape[2])) if window_indices is None else window_indices
-    # Get the indirect weights of the specified TFs over the specified windows
-    indirect_weights_of_tf_target = global_grn_weights[np.ix_(tf_indices, slice(None), window_indices)]
-    # Apply sparsity mask to final weights (in case any edges don't meet threshold)
-    final_sparsity_mask = sparsity_mask[np.ix_(tf_indices, slice(None))]
-    masked_weights = np.where(final_sparsity_mask[:, :, np.newaxis], indirect_weights_of_tf_target, 0)
-    active_links = np.any(masked_weights != 0, axis=2)  # shape: (n_selected_tfs, n_selected_targets)
-    # Get indices of active TFs and targets
-    active_tf_idx = np.any(active_links, axis=1)  # TFs with at least one target
-    active_target_idx = np.any(active_links, axis=0)  # Targets with at least one TF
-    # Filter weights to keep only active links
-    filtered_weights = masked_weights[active_tf_idx][:, active_target_idx, :]
-    return filtered_weights, active_tf_idx, active_target_idx, missing_tfs
-
-def get_grn_weights_for_tf_target_pairs(
-    dictys_dynamic_object, tf_names=None, target_names=None, window_indices=None, nonzero_fraction_threshold=0.1
-):
-    """
-    Get the weights for specific TF-target pairs over specific windows.
-    """
-    # Get the weights array
-    global_grn_weights = dictys_dynamic_object.prop["es"]["w_n"]
-    # Apply sparsity filter to global GRN first
-    nonzero_edge_fraction_across_pseudotime = (global_grn_weights != 0).mean(axis=2)  # mean of a boolean, shape is total TFs x total targets
-    sparsity_mask = nonzero_edge_fraction_across_pseudotime >= nonzero_fraction_threshold
-    # get the indices of the TFs
-    tf_indices, _, missing_tfs = get_tf_indices(dictys_dynamic_object, tf_names)
-    # get the indices of the targets
-    target_indices = get_gene_indices(dictys_dynamic_object, target_names)
-    # Convert indices to lists
-    tf_indices = list(tf_indices) if tf_indices is not None else []
-    target_indices = list(target_indices) if target_indices is not None else []
-    window_indices = list(range(global_grn_weights.shape[2])) if window_indices is None else window_indices
-    # Get weights of the specified TF-target pairs over the specified windows
-    weights_of_tf_target = global_grn_weights[np.ix_(tf_indices, target_indices, window_indices)]
-    # Apply sparsity mask to final weights (in case any edges don't meet threshold)
-    final_sparsity_mask = sparsity_mask[np.ix_(tf_indices, target_indices)]
-    masked_weights = np.where(final_sparsity_mask[:, :, np.newaxis], weights_of_tf_target, 0)
-    active_links = np.any(masked_weights != 0, axis=2)  # shape: (n_selected_tfs, n_selected_targets)
-    # Get indices of active TFs and targets
-    active_tf_idx = np.any(active_links, axis=1)  # TFs with at least one target
-    active_target_idx = np.any(active_links, axis=0)  # Targets with at least one TF
-    # Filter weights to keep only active links
-    filtered_weights = masked_weights[active_tf_idx][:, active_target_idx, :]
-    return filtered_weights, active_tf_idx, active_target_idx, missing_tfs
-
-def get_one_hop_grn_weights(dictys_dynamic_object, tf_indices=None, gene_indices=None, window_indices=None, nonzero_fraction_threshold=0.1):
-    """
-    Get the LF intersection with GRN weight matrix. Add new TF nodes that regulate the specified target genes. Don't add new target nodes.
-    """
-    # Get the weights array
-    global_grn_weights = dictys_dynamic_object.prop["es"]["w_n"]
-    # Apply sparsity filter to global GRN first (across all windows, there can be sparsity in one branch but not the other)
-    nonzero_edge_fraction_across_all_windows = (global_grn_weights != 0).mean(axis=2)  # mean of a boolean, shape is total TFs x total targets
-    sparsity_mask = nonzero_edge_fraction_across_all_windows >= nonzero_fraction_threshold
-    # Convert query indices to lists if they're not already
-    tf_indices = list(tf_indices) if tf_indices is not None else []
-    gene_indices = list(gene_indices) if gene_indices is not None else []
-    # use all windows if indices are not specified
-    window_indices = list(range(global_grn_weights.shape[2])) if window_indices is None else window_indices
-    # Augment the TF nodes that regulate the specified target genes (considering sparsity)
-    if gene_indices:
-        # Only consider edges that pass sparsity filter
-        tf_mask = np.any(sparsity_mask[:, gene_indices], axis=1)
-        regulating_tf_indices = np.where(tf_mask)[0]
-        # Combine with specified TF indices, removing duplicates while preserving order
-        all_tf_indices = list(dict.fromkeys(tf_indices + list(regulating_tf_indices)))
-    else:
-        all_tf_indices = tf_indices
-    
-    # Extract the combined weights matrix using the computed indices
-    combined_weights = global_grn_weights[np.ix_(all_tf_indices, gene_indices, window_indices)]
-    # Apply sparsity mask to final weights (in case non-augmented edges don't meet threshold)
-    final_sparsity_mask = sparsity_mask[np.ix_(all_tf_indices, gene_indices)]
-    combined_weights = np.where(final_sparsity_mask[:, :, np.newaxis], combined_weights, 0)
-    return combined_weights, final_sparsity_mask, all_tf_indices
-
-from multiprocessing import Pool
-from functools import partial
-
-def _process_subset(subset: int, tmp_dynamic_dir: str) -> float:
-    """
-    Helper function to process a single subset and extract PAX5->RUNX2 edge weight
-    """
-    linking_file = f"{tmp_dynamic_dir}/Subset{subset}/linking.tsv.gz"
-    linking = pd.read_csv(linking_file, header=0, index_col=None, sep='\t', compression='gzip')
-    pax5_runx2_edge_weight = linking.loc[linking['Unnamed: 0'] == 'PAX5', 'RUNX2'].values[0]
-    return pax5_runx2_edge_weight
-
-def pax5_runx2_chromatin_grn(tmp_dynamic_dir: str, n_cores: int = None) -> list:
-    """
-    Get the chromatin GRN edge weight (stat) for PAX5->RUNX2 regulation and save to list.
-    Parallelized version using multiple CPU cores.
-    
-    Args:
-        tmp_dynamic_dir: Directory containing subset folders
-        n_cores: Number of CPU cores to use. If None, uses all available cores.
-    
-    Returns:
-        List of edge weights across all subsets.
-    """
-    # If n_cores is None, use all available cores
-    if n_cores is None:
-        n_cores = os.cpu_count()
-    
-    # Create partial function with fixed tmp_dynamic_dir
-    process_subset_partial = partial(_process_subset, tmp_dynamic_dir=tmp_dynamic_dir)
-    
-    # Create pool of workers and process subsets in parallel
-    with Pool(processes=n_cores) as pool:
-        edge_weights = pool.map(process_subset_partial, range(1, 195))
-    
-    return edge_weights
-    
 ##################################### Similarity metrics ############################################
 
-def get_sign_switching_pairs(pb_weights, gc_weights, tf_names, target_names, 
-                           edge_presence_threshold=0.3,
-                           mean_weight=0.3,
-                           spread_weight=0.2,
-                           min_sign_changes=2):
+
+def get_sign_switching_pairs(
+    pb_weights,
+    gc_weights,
+    tf_names,
+    target_names,
+    edge_presence_threshold=0.3,
+    mean_weight=0.3,
+    spread_weight=0.2,
+    min_sign_changes=2,
+):
     """
     Find TF-target pairs that show regulation sign changes between PB and GC branches,
     prioritizing by number of sign changes and considering mean and spread differences.
     """
     # Verify dimensions
-    assert len(tf_names) == pb_weights.shape[0], "Number of TF names doesn't match weight matrix"
-    assert len(target_names) == pb_weights.shape[1], "Number of target names doesn't match weight matrix"
+    assert (
+        len(tf_names) == pb_weights.shape[0]
+    ), "Number of TF names doesn't match weight matrix"
+    assert (
+        len(target_names) == pb_weights.shape[1]
+    ), "Number of target names doesn't match weight matrix"
     n_windows = min(pb_weights.shape[2], gc_weights.shape[2])
     # Calculate edge presence in each branch
     pb_edge_presence = np.mean(pb_weights[:, :, :n_windows] != 0, axis=2)
     gc_edge_presence = np.mean(gc_weights[:, :, :n_windows] != 0, axis=2)
-    edge_present = (pb_edge_presence > edge_presence_threshold) & \
-                  (gc_edge_presence > edge_presence_threshold)
+    edge_present = (pb_edge_presence > edge_presence_threshold) & (
+        gc_edge_presence > edge_presence_threshold
+    )
     # Initialize arrays to store metrics
     sign_changes = np.zeros((pb_weights.shape[0], pb_weights.shape[1]))
     mean_diffs = np.zeros_like(sign_changes)
@@ -348,15 +151,21 @@ def get_sign_switching_pairs(pb_weights, gc_weights, tf_names, target_names,
                 gc_spread = np.std(gc_vals)
                 spread_diffs[i, j] = np.abs(pb_spread - gc_spread)
     # Normalize mean and spread differences to [0, 1] range
-    mean_diffs_norm = mean_diffs / np.max(mean_diffs) if np.max(mean_diffs) > 0 else mean_diffs
-    spread_diffs_norm = spread_diffs / np.max(spread_diffs) if np.max(spread_diffs) > 0 else spread_diffs
+    mean_diffs_norm = (
+        mean_diffs / np.max(mean_diffs) if np.max(mean_diffs) > 0 else mean_diffs
+    )
+    spread_diffs_norm = (
+        spread_diffs / np.max(spread_diffs)
+        if np.max(spread_diffs) > 0
+        else spread_diffs
+    )
     # Filter pairs with more than minimum sign changes
     sufficient_changes = sign_changes >= min_sign_changes
     # Calculate composite scores
     # Note: sign_changes are not normalized as they are the primary filter
-    composite_scores = (sign_changes + 
-                       mean_weight * mean_diffs_norm + 
-                       spread_weight * spread_diffs_norm)
+    composite_scores = (
+        sign_changes + mean_weight * mean_diffs_norm + spread_weight * spread_diffs_norm
+    )
     # Get indices of pairs that pass filters
     tf_idx, target_idx = np.where(sufficient_changes & edge_present)
     # Get scores and sort
@@ -372,27 +181,35 @@ def get_sign_switching_pairs(pb_weights, gc_weights, tf_names, target_names,
         filtered_pairs.append((tf_names[tf_i], target_names[target_i]))
         pair_scores.append(scores[i])
         # Store detailed metrics
-        pair_metrics.append({
-            'sign_changes': sign_changes[tf_i, target_i],
-            'mean_diff': mean_diffs[tf_i, target_i],
-            'spread_diff': spread_diffs[tf_i, target_i],
-            'pb_pattern': pb_weights[tf_i, target_i, :n_windows],
-            'gc_pattern': gc_weights[tf_i, target_i, :n_windows]
-        })
+        pair_metrics.append(
+            {
+                "sign_changes": sign_changes[tf_i, target_i],
+                "mean_diff": mean_diffs[tf_i, target_i],
+                "spread_diff": spread_diffs[tf_i, target_i],
+                "pb_pattern": pb_weights[tf_i, target_i, :n_windows],
+                "gc_pattern": gc_weights[tf_i, target_i, :n_windows],
+            }
+        )
     return filtered_pairs, pair_scores, pair_metrics
 
+
 ##################################### Window labels ############################################
+
 
 def get_state_labels_in_window(dictys_dynamic_object, cell_labels):
     """
     Creates a mapping of window indices to their constituent cells' labels
     """
     # get cell assignment matrix from dictys_dynamic_object.prop['sc']['w']
-    cell_assignment_matrix = dictys_dynamic_object.prop['sc']['w']
+    cell_assignment_matrix = dictys_dynamic_object.prop["sc"]["w"]
     state_labels_in_window = {}
     for window_idx in range(cell_assignment_matrix.shape[0]):
-        indices_of_cells_present_in_window = np.where(cell_assignment_matrix[window_idx] == 1)[0]
-        state_labels_in_window[window_idx] = [cell_labels[idx] for idx in indices_of_cells_present_in_window]
+        indices_of_cells_present_in_window = np.where(
+            cell_assignment_matrix[window_idx] == 1
+        )[0]
+        state_labels_in_window[window_idx] = [
+            cell_labels[idx] for idx in indices_of_cells_present_in_window
+        ]
     return state_labels_in_window
 
 def get_state_total_counts(cell_labels):
@@ -426,12 +243,14 @@ def get_top_k_fraction_labels(dictys_dynamic_object, window_idx, cell_labels, k=
         state_distribution = window_counts[state] / state_total_counts[state]
         state_metrics[state] = (window_composition, state_distribution)
     # Sort primarily by state_distribution, then by window_composition
-    sorted_states = sorted(state_metrics.items(),
-                         key=lambda x: (x[1][1], x[1][0]),
-                         reverse=True)
+    sorted_states = sorted(
+        state_metrics.items(), key=lambda x: (x[1][1], x[1][0]), reverse=True
+    )
     return sorted_states[:k]
 
+
 ##################################### Curve computation ############################################
+
 
 def compute_expression_regulation_curves(
     dictys_dynamic_object,
@@ -460,242 +279,157 @@ def compute_expression_regulation_curves(
     tmp_y = stat1_y.compute(pts)
     tmp_x = stat1_x.compute(pts)
     dy = pd.DataFrame(tmp_y, index=stat1_y.names[0])
-    dx = pd.Series(tmp_x[0]) #first gene's pseudotime is taken as all genes have the same pseudotime
+    dx = pd.Series(
+        tmp_x[0]
+    )  # first gene's pseudotime is taken as all genes have the same pseudotime
     return dy, dx
 
-def auc(dx:NDArray[float],dy:NDArray[float])->NDArray[float]:
-	"""
-	Computes area under the curves.
-
-	Parameters
-	----------
-	dx:	numpy.ndarray(shape=(n,))
-		X coordinates 
-	dy:	numpy.ndarray(shape=(ny,n))
-		Y coordinates, one for each y curve
-
-	Returns
-	-------
-	numpy.ndarray(shape=(ny,))
-		Area under the curves
-	"""
-	if len(dx)<2 or not (dx[1:]>dx[:-1]).all():
-		raise ValueError('dx must be increasing and have at least 2 values.')
-	dxdiff=dx[1:]-dx[:-1]
-	dymean=(dy[:,1:]+dy[:,:-1])/2
-	ans=dymean@dxdiff
-	return ans
-
-def _dynamic_network_char_transient_logfc_(dx:NDArray[float],dy:NDArray[float])->NDArray[float]:
-	"""
-	Computes transient logFC for curves.
-
-	Parameters
-	----------
-	dx:	numpy.ndarray(shape=(n,))
-		X coordinates 
-	dy:	numpy.ndarray(shape=(ny,n))
-		Y coordinates, one for each y curve
-
-	Returns
-	-------
-	numpy.ndarray(shape=(ny,))
-		Transient logFCs
-	"""
-	import numpy as np
-	n=dy.shape[1]
-	dx=(dx-dx[0])/(dx[-1]-dx[0])
-	dy=dy-np.median([dy,np.repeat(dy[:,[0]],n,axis=1),np.repeat(dy[:,[-1]],n,axis=1)],axis=0)
-	return auc(dx,dy)
-
-def _dynamic_network_char_switching_time_(dx:NDArray[float],dy:NDArray[float])->NDArray[float]:
-	"""
-	Computes switching time for curves.
-
-	Parameters
-	----------
-	dx:	numpy.ndarray(shape=(n,))
-		X coordinates 
-	dy:	numpy.ndarray(shape=(ny,n))
-		Y coordinates, one for each y curve
-
-	Returns
-	-------
-	numpy.ndarray(shape=(ny,))
-		Switching time
-	"""
-	import numpy as np
-	n=dy.shape[1]
-	dx=(dx-dx[0])/(dx[-1]-dx[0])
-	dy=np.median([dy,np.repeat(dy[:,[0]],n,axis=1),np.repeat(dy[:,[-1]],n,axis=1)],axis=0)
-	return (auc(dx,(dy.T-dy[:,-1]).T))/(dy[:,0]-dy[:,-1]+1E-300)
-
-def _dynamic_network_char_terminal_logfc_(dx:NDArray[float],dy:NDArray[float])->NDArray[float]:
-	"""
-	Computes terminal logFC for curves.
-
-	Parameters
-	----------
-	dx:	numpy.ndarray(shape=(n,))
-		X coordinates 
-	dy:	numpy.ndarray(shape=(ny,n))
-		Y coordinates, one for each y curve
-
-	Returns
-	-------
-	numpy.ndarray(shape=(ny,))
-		Terminal logFCs
-	"""
-	if len(dx)<2 or not (dx[1:]>dx[:-1]).all():
-		raise ValueError('dx must be increasing and have at least 2 values.')
-	return dy[:,-1]-dy[:,0]
-
-def compute_curve_characteristics(dcurve,dtime):
+def auc(dx: NDArray[float], dy: NDArray[float]) -> NDArray[float]:
     """
-    Compute curve characteristics for one branch. 
+    Computes area under the curves.
+    """
+    if len(dx) < 2 or not (dx[1:] > dx[:-1]).all():
+        raise ValueError("dx must be increasing and have at least 2 values.")
+    dxdiff = dx[1:] - dx[:-1]
+    dymean = (dy[:, 1:] + dy[:, :-1]) / 2
+    ans = dymean @ dxdiff
+    return ans
+
+def _dynamic_network_char_transient_logfc_(
+    dx: NDArray[float], dy: NDArray[float]
+) -> NDArray[float]:
+    """
+    Computes transient logFC for curves.
+    """
+    import numpy as np
+
+    n = dy.shape[1]
+    dx = (dx - dx[0]) / (dx[-1] - dx[0])
+    dy = dy - np.median(
+        [dy, np.repeat(dy[:, [0]], n, axis=1), np.repeat(dy[:, [-1]], n, axis=1)],
+        axis=0,
+    )
+    return auc(dx, dy)
+
+def _dynamic_network_char_switching_time_(
+    dx: NDArray[float], dy: NDArray[float]
+) -> NDArray[float]:
+    """
+    Computes switching time for curves.
+    """
+    import numpy as np
+
+    n = dy.shape[1]
+    dx = (dx - dx[0]) / (dx[-1] - dx[0])
+    dy = np.median(
+        [dy, np.repeat(dy[:, [0]], n, axis=1), np.repeat(dy[:, [-1]], n, axis=1)],
+        axis=0,
+    )
+    return (auc(dx, (dy.T - dy[:, -1]).T)) / (dy[:, 0] - dy[:, -1] + 1e-300)
+
+def _dynamic_network_char_terminal_logfc_(
+    dx: NDArray[float], dy: NDArray[float]
+) -> NDArray[float]:
+    """
+    Computes terminal logFC for curves.
+    """
+    if len(dx) < 2 or not (dx[1:] > dx[:-1]).all():
+        raise ValueError("dx must be increasing and have at least 2 values.")
+    return dy[:, -1] - dy[:, 0]
+
+def compute_curve_characteristics(dcurve, dtime):
+    """
+    Compute curve characteristics for one branch.
     Switching time, Terminal logFC, Transient logFC per TF
     """
-    charlist={
-		'Terminal logFC':_dynamic_network_char_terminal_logfc_,
-		'Transient logFC':_dynamic_network_char_transient_logfc_,
-		'Switching time':_dynamic_network_char_switching_time_,
-	}
-    #Compute curve characteristics
-    dchar={}
+    charlist = {
+        "Terminal logFC": _dynamic_network_char_terminal_logfc_,
+        "Transient logFC": _dynamic_network_char_transient_logfc_,
+        "Switching time": _dynamic_network_char_switching_time_,
+    }
+    # Compute curve characteristics
+    dchar = {}
     for xj in charlist:
-        dchar[xj]=charlist[xj](dtime.values,dcurve.values)
-    dchar=pd.DataFrame.from_dict(dchar)
-    dchar.set_index(dcurve.index,inplace=True,drop=True)
+        dchar[xj] = charlist[xj](dtime.values, dcurve.values)
+    dchar = pd.DataFrame.from_dict(dchar)
+    dchar.set_index(dcurve.index, inplace=True, drop=True)
     return dchar
 
-def rank_TF_dynamics(self,start:int,stop:int,num:int=100,dist:float=1.5,mode:str='regulation',sparsity:float=0.01,ntops:Tuple[int,int,int,int]=(8,8,4,4)):
+def get_curvature_of_expression(dcurve: pd.DataFrame, dtime: pd.Series):
     """
-    Returns ranked TFs for one branch.
+    Calculate the curvature of expression curves.
     """
-    pts,fsmooth=self.linspace(start,stop,num,dist)
-    if mode=='regulation':
-        #Log number of targets
-        stat1_net=fsmooth(stat.net(self))
-        stat1_netbin=stat.fbinarize(stat1_net,sparsity=sparsity)
-        stat1_y=stat.flnneighbor(stat1_netbin)
-    elif mode=='weighted_regulation':
-        #Log weighted outdegree
-        stat1_net=fsmooth(stat.net(self))
-        stat1_y=stat.flnneighbor(stat1_net,weighted_sparsity=sparsity)
-    elif mode=='expression':
-        stat1_y=fsmooth(stat.lcpm(self,cut=0))
-    elif mode=='TF_expression':
-        stat1_y=fsmooth(stat.lcpm_tf(self,cut=0))
-    else:
-        raise ValueError(f'Unknown mode {mode}.')
-    #Pseudo time
-    stat1_x=stat.pseudotime(self,pts)
-    dcurve=pd.DataFrame(stat1_y.compute(pts),index=stat1_y.names[0])
-    dtime=pd.Series(stat1_x.compute(pts)[0]) #gene1's pseudotime is used as all genes have the same pseudotime
-    #Compute curve characteristics
-    dchar=compute_curve_characteristics(dcurve,dtime)
-    #Parameters for 4 plots
-    ans=[]
-    if ntops[0]>0:
-        #Activating
-        t1=dchar.sort_values('Terminal logFC',ascending=False).index[:ntops[0]]
-        t1=dchar.loc[t1].sort_values('Switching time').index
-        ans.append([[dcurve.loc[t1],dchar.loc[t1][['Switching time','Terminal logFC']]],dict(dtime=dtime)])
-    if ntops[1]>0:
-        #Inactivating
-        t1=dchar.sort_values('Terminal logFC',ascending=True).index[:ntops[1]]
-        t1=dchar.loc[t1].sort_values('Switching time').index
-        ans.append([[dcurve.loc[t1],dchar.loc[t1][['Switching time','Terminal logFC']]],dict(dtime=dtime)])
-    if ntops[2]>0:
-        #Transient up
-        t1=dchar.sort_values('Transient logFC',ascending=False).index[:ntops[2]]
-        ans.append([[dcurve.loc[t1],dchar.loc[t1][['Transient logFC','Terminal logFC']]],dict(dtime=dtime)])
-    if ntops[3]>0:
-        #Transient down
-        t1=dchar.sort_values('Transient logFC',ascending=True).index[:ntops[3]]
-        ans.append([[dcurve.loc[t1],dchar.loc[t1][['Transient logFC','Terminal logFC']]],dict(dtime=dtime)])
-    return ans
+    # First derivative (dx/dt)
+    dx_dt = pd.DataFrame(
+        np.gradient(dcurve, dtime, axis=1), index=dcurve.index, columns=dcurve.columns
+    )
+    # Second derivative (d2x/dt2)
+    d2x_dt2 = pd.DataFrame(
+        np.gradient(dx_dt, dtime, axis=1), index=dcurve.index, columns=dcurve.columns
+    )
+    return d2x_dt2
+
+def calculate_force_curves(
+    beta_curves: pd.DataFrame, tf_expression: pd.Series
+) -> pd.DataFrame:
+    """
+    Calculate force curves using log transformation
+    """
+    # Count number of targets per TF from beta_curves multi-index
+    targets_per_tf = beta_curves.index.get_level_values(0).value_counts()
+    # Create a DataFrame with repeated TF expression values for each target
+    expanded_tf_expr = pd.DataFrame(
+        np.repeat(
+            tf_expression.values, targets_per_tf.values, axis=0
+        ),  # Repeat each TF's row 30 times
+        index=beta_curves.index,  # Use beta_curves' multi-index
+        columns=beta_curves.columns,
+    )
+    # Convert to numpy arrays for calculations
+    beta_array = beta_curves.to_numpy()
+    tf_array = expanded_tf_expr.to_numpy()
+    # Add small epsilon to avoid log(0)
+    epsilon = 1e-10
+    log_beta = np.log10(np.abs(beta_array) + epsilon)
+    log_tf = np.log10(tf_array + epsilon)
+    # Preserve signs from original beta values
+    signs = np.sign(beta_array)
+    # Calculate forces
+    force_array = signs * np.exp(log_beta + log_tf)
+    # Convert back to DataFrame with original index/columns
+    force_curves = pd.DataFrame(
+        force_array, index=beta_curves.index, columns=beta_curves.columns
+    )
+    return force_curves
+
 
 #################################### LF + DyGRN ############################################
 
-def classify_genes_by_expression_dynamics(dchar, ntops=(20,20,30,30)):
+
+def get_unique_regs_by_target(max_force_df):
     """
-    Classify genes based on effect size distributions, keeping only top N genes.
+    Create dictionary of unique TF-target pairs for each target
     """
-    # Min-max scaling for Terminal and Transient logFC
-    normalized_dchar = dchar.copy()
-    # Scale Terminal logFC
-    terminal_abs = np.abs(dchar['Terminal logFC'])
-    terminal_min = terminal_abs.min()
-    terminal_max = terminal_abs.max()
-    normalized_dchar['Terminal logFC'] = (terminal_abs - terminal_min) / (terminal_max - terminal_min)
-    normalized_dchar['Terminal logFC'] *= np.sign(dchar['Terminal logFC'])
-    # Scale Transient logFC
-    transient_abs = np.abs(dchar['Transient logFC'])
-    transient_min = transient_abs.min()
-    transient_max = transient_abs.max()
-    normalized_dchar['Transient logFC'] = (transient_abs - transient_min) / (transient_max - transient_min)
-    normalized_dchar['Transient logFC'] *= np.sign(dchar['Transient logFC'])
-    # Initialize dictionaries
-    classifications = {
-        'up_regulated': [],
-        'transient_up': [],
-        'down_regulated': [],
-        'transient_down': []
-    }
-    effect_sizes = {
-        'up_regulated': {},
-        'transient_up': {},
-        'down_regulated': {},
-        'transient_down': {}
-    }
-    # Classify genes using normalized values
-    for idx, row in normalized_dchar.iterrows():
-        terminal = row['Terminal logFC']
-        transient = row['Transient logFC']
-        if abs(terminal) < 1e-10 and abs(transient) < 1e-10:
-            continue
-        if abs(terminal) >= abs(transient):
-            if terminal > 0:
-                classifications['up_regulated'].append(idx)
-                effect_sizes['up_regulated'][idx] = abs(terminal)
-            else:
-                classifications['down_regulated'].append(idx)
-                effect_sizes['down_regulated'][idx] = abs(terminal)
-        else:
-            if transient > 0:
-                classifications['transient_up'].append(idx)
-                effect_sizes['transient_up'][idx] = abs(transient)
-            else:
-                classifications['transient_down'].append(idx)
-                effect_sizes['transient_down'][idx] = abs(transient)
-    # Sort and keep top N genes
-    sorted_classifications = {}
-    percentiles_used = {}
-    # Map categories to their ntops value
-    category_ntops = {
-        'up_regulated': ntops[0],
-        'transient_up': ntops[1],
-        'down_regulated': ntops[2],
-        'transient_down': ntops[3]
-    }
-    for category in classifications:
-        if len(effect_sizes[category]) == 0:
-            sorted_classifications[category] = []
-            percentiles_used[category] = None
-            continue
-        # Sort genes by effect size
-        sorted_genes = sorted(effect_sizes[category].items(), key=lambda x: x[1], reverse=True)
-        # Take top N genes
-        n_keep = min(category_ntops[category], len(sorted_genes))
-        sorted_classifications[category] = [gene for gene, _ in sorted_genes[:n_keep]]
-        # Calculate effective percentile
-        if n_keep > 0:
-            effective_percentile = 100 * (1 - n_keep / len(effect_sizes[category]))
-            percentiles_used[category] = effective_percentile
-    return sorted_classifications, percentiles_used
+    # Get unique targets
+    targets = max_force_df.index.get_level_values(1).unique()
+    # Initialize dictionary
+    tf_target_pairs_per_gene = {}
+    # Process each target
+    for target in targets:
+        # Get rows for this target
+        target_mask = max_force_df.index.get_level_values(1) == target
+        target_data = max_force_df[target_mask]
+        # Get unique TFs for this target
+        unique_tfs = target_data.index.get_level_values(0).unique()
+        # Create list of tuples
+        tf_target_pairs = [(str(tf), str(target)) for tf in unique_tfs]
+        # Store in dictionary
+        tf_target_pairs_per_gene[target] = tf_target_pairs
+    return tf_target_pairs_per_gene
+
 
 ##################################### Plotting ############################################
+
 
 def fig_regulation_heatmap(
     network: dictys.net.dynamic_network,
@@ -705,10 +439,12 @@ def fig_regulation_heatmap(
     num: int = 100,
     dist: float = 1.5,
     ax: Optional[matplotlib.axes.Axes] = None,
-    cmap: Union[str, matplotlib.cm.ScalarMappable] = 'coolwarm',
+    cmap: Union[str, matplotlib.cm.ScalarMappable] = "coolwarm",
     figsize: Tuple[float, float] = (2, 0.15),
-    vmax: Optional[float] = None
-) -> Tuple[matplotlib.pyplot.Figure, matplotlib.axes.Axes, matplotlib.cm.ScalarMappable]:
+    vmax: Optional[float] = None,
+) -> Tuple[
+    matplotlib.pyplot.Figure, matplotlib.axes.Axes, matplotlib.cm.ScalarMappable
+]:
     """
     Draws pseudo-time dependent heatmap of regulation strengths without clustering.
     Maintains the original order of regulation pairs as provided in the input list.
@@ -723,9 +459,13 @@ def fig_regulation_heatmap(
     tdict = [dict(zip(x, range(len(x)))) for x in stat1_net.names]
     t1 = [[x[y] for x in regulations if x[y] not in tdict[y]] for y in range(2)]
     if len(t1[0]) > 0:
-        raise ValueError("Regulator gene(s) {} not found in network.".format("/".join(t1[0])))
+        raise ValueError(
+            "Regulator gene(s) {} not found in network.".format("/".join(t1[0]))
+        )
     if len(t1[1]) > 0:
-        raise ValueError("Target gene(s) {} not found in network.".format("/".join(t1[1])))
+        raise ValueError(
+            "Target gene(s) {} not found in network.".format("/".join(t1[1]))
+        )
     # Extract regulations to draw
     dnet = stat1_net.compute(pts)
     t1 = np.array([[tdict[0][x[0]], tdict[1][x[1]]] for x in regulations]).T
@@ -746,15 +486,16 @@ def fig_regulation_heatmap(
         if vmax is None:
             vmax = np.quantile(np.abs(dnet).ravel(), 0.95)
         cmap = matplotlib.cm.ScalarMappable(
-            norm=matplotlib.colors.Normalize(vmin=-vmax, vmax=vmax), 
-            cmap=cmap
+            norm=matplotlib.colors.Normalize(vmin=-vmax, vmax=vmax), cmap=cmap
         )
     elif vmax is not None:
-        raise ValueError("vmax should not be set if cmap is a matplotlib.cm.ScalarMappable.")
+        raise ValueError(
+            "vmax should not be set if cmap is a matplotlib.cm.ScalarMappable."
+        )
     if hasattr(cmap, "to_rgba"):
-        im = ax.imshow(cmap.to_rgba(dnet), aspect=aspect, interpolation='none')
+        im = ax.imshow(cmap.to_rgba(dnet), aspect=aspect, interpolation="none")
     else:
-        im = ax.imshow(dnet, aspect=aspect, interpolation='none', cmap=cmap)
+        im = ax.imshow(dnet, aspect=aspect, interpolation="none", cmap=cmap)
         plt.colorbar(im, label="Regulation strength")
     # Set pseudotime labels as x axis labels
     ax.set_xlabel("Pseudotime")
@@ -771,204 +512,260 @@ def fig_regulation_heatmap(
     ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
     return fig, ax, dnet
 
-def cluster_heatmap(d,
-		optimal_ordering=True,
-		method='ward',
-		metric='euclidean',
-		dshow=None,
-		fig=None,
-		cmap='coolwarm',
-		aspect=0.1,
-		figscale=0.02,
-		dtop=0.3,
-		dright=0,
-		wcolorbar=0.03,
-		wedge=0.03,
-		xselect=None,
-		yselect=None,
-		xtick=False,
-		ytick=True,
-		vmin=None,
-		vmax=None,
-		inverty=True):
-	"""
-	Draw 2-D hierachical clustering of pandas.DataFrame, with optional hierachical clustering on both axes.
-	X/Y axis of figure corresponds to columns/rows of the dataframe.
-	d:		Pandas.DataFrame 2D data with index & column names for clustering.
-	optimal_ordering: passed to scipy.cluster.hierarchy.dendrogram
-	method: Method of hierarchical clustering, passed to scipy.cluster.hierarchy.linkage.
-			Accepts single strs or a tuple of two strings for different method options for x and y.
-	metric:	Metric to compute pariwise distance for clustering, passed to scipy.spatial.distance.pdist.
-			Accepts single strs or a tuple of two strings for different metric options for x and y.
-	dshow:	Pandas.DataFrame 2D data with index & column names to draw heatmap. Defaults to d.
-	fig:	Figure to plot on.
-	cmap:	Colormap
-	aspect:	Aspect ratio
-	figscale:	Scale of figure compared to font.
-	dtop,
-	dright:	Top and right dendrogram size. Value from 0 to 1 values as proportion.
-			If 0, do not cluster on given axis.
-	wcolorbar: Width of colorbar. Value from 0 to 1 values as proportion.
-	wedge:	Width of edges and between colorbar and main figure.
-			Value from 0 to 1 values as proportion.
-	xselect,
-	yselect:np.array(bool) of coordinates to draw. Current only selected coordinates are used for clustering.
-			TODO: All coordinates in d are used for clustering.
-	xtick,
-	ytick:	Whether to show ticks.
-	vmin,
-	vmax:	Minimum/maximum values of heatmap.
-	inverty:Whether to invert direction of y.
-	Return:
-	figure:	plt.Figure drawn on
-	x:		column IDs included
-	y:		index IDs included.
-	"""
-	import matplotlib.pyplot as plt
-	from scipy.cluster.hierarchy import dendrogram, linkage
-	import numpy as np
-	assert isinstance(xtick,bool) or (isinstance(xtick,list) and len(xtick) == d.shape[1])
-	assert isinstance(ytick,bool) or (isinstance(ytick,list) and len(ytick) == d.shape[0])
-	if isinstance(method,str):
-		method=[method,method]
-	if len(method)!=2:
-		raise ValueError('Parameter "method" must have size 2 for x and y respectively.')
-	if isinstance(metric,str):
-		metric=[metric,metric]
-	if metric is not None and len(metric)!=2:
-		raise ValueError('Parameter "metric" must have size 2 for x and y respectively.')
-	if metric is None:
-		assert d.ndim==2 and d.shape[0]==d.shape[1]
-		assert (d.index==d.columns).all()
-		assert method[0]==method[1]
-		if xselect is not None:
-			assert yselect is not None
-			assert (xselect==yselect).all()
-		else:
-			assert yselect is None
-	if dshow is None:
-		dshow=d
-	assert dshow.shape==d.shape and (dshow.index==d.index).all() and (dshow.columns==d.columns).all()
-	xt0 = d.columns if isinstance(xtick,bool) else xtick
-	yt0 = d.index if isinstance(ytick,bool) else ytick
-	# Genes to highlight
-	d2 = d.copy()
-	if xselect is not None:
-		d2 = d2.loc[:, xselect]
-		dshow=dshow.loc[:,xselect]
-		xt0 = [xt0[x] for x in np.nonzero(xselect)[0]]
-	if yselect is not None:
-		d2 = d2.loc[yselect]
-		dshow=dshow.loc[yselect]
-		yt0 = [yt0[x] for x in np.nonzero(yselect)[0]]
+def cluster_heatmap(
+    d,
+    optimal_ordering=True,
+    method="ward",
+    metric="euclidean",
+    dshow=None,
+    fig=None,
+    cmap="coolwarm",
+    aspect=0.1,
+    figscale=0.02,
+    dtop=0.3,
+    dright=0,
+    wcolorbar=0.03,
+    wedge=0.03,
+    xselect=None,
+    yselect=None,
+    xtick=False,
+    ytick=True,
+    vmin=None,
+    vmax=None,
+    inverty=True,
+):
+    """
+    Draw 2-D hierachical clustering of pandas.DataFrame, with optional hierachical clustering on both axes.
+    X/Y axis of figure corresponds to columns/rows of the dataframe.
+    d:		Pandas.DataFrame 2D data with index & column names for clustering.
+    optimal_ordering: passed to scipy.cluster.hierarchy.dendrogram
+    method: Method of hierarchical clustering, passed to scipy.cluster.hierarchy.linkage.
+                    Accepts single strs or a tuple of two strings for different method options for x and y.
+    metric:	Metric to compute pariwise distance for clustering, passed to scipy.spatial.distance.pdist.
+                    Accepts single strs or a tuple of two strings for different metric options for x and y.
+    dshow:	Pandas.DataFrame 2D data with index & column names to draw heatmap. Defaults to d.
+    fig:	Figure to plot on.
+    cmap:	Colormap
+    aspect:	Aspect ratio
+    figscale:	Scale of figure compared to font.
+    dtop,
+    dright:	Top and right dendrogram size. Value from 0 to 1 values as proportion.
+                    If 0, do not cluster on given axis.
+    wcolorbar: Width of colorbar. Value from 0 to 1 values as proportion.
+    wedge:	Width of edges and between colorbar and main figure.
+                    Value from 0 to 1 values as proportion.
+    xselect,
+    yselect:np.array(bool) of coordinates to draw. Current only selected coordinates are used for clustering.
+                    TODO: All coordinates in d are used for clustering.
+    xtick,
+    ytick:	Whether to show ticks.
+    vmin,
+    vmax:	Minimum/maximum values of heatmap.
+    inverty:Whether to invert direction of y.
+    Return:
+    figure:	plt.Figure drawn on
+    x:		column IDs included
+    y:		index IDs included.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from scipy.cluster.hierarchy import dendrogram, linkage
 
-	wtop = dtop / (1 + d2.shape[0] / 8)
-	wright = dright / (1 + d2.shape[1] * aspect / 8)
-	iscolorbar = wcolorbar > 0
-	t1 = np.array(d2.T.shape)
-	t1 = t1 * figscale
-	t1[1] /= aspect
-	t1[1] /= 1 - wedge * 2 - wtop
-	t1[0] /= 1 - wedge * (2 + iscolorbar) - wright - wcolorbar
-	if fig is None:
-		fig = plt.figure(figsize=t1)
+    assert isinstance(xtick, bool) or (
+        isinstance(xtick, list) and len(xtick) == d.shape[1]
+    )
+    assert isinstance(ytick, bool) or (
+        isinstance(ytick, list) and len(ytick) == d.shape[0]
+    )
+    if isinstance(method, str):
+        method = [method, method]
+    if len(method) != 2:
+        raise ValueError(
+            'Parameter "method" must have size 2 for x and y respectively.'
+        )
+    if isinstance(metric, str):
+        metric = [metric, metric]
+    if metric is not None and len(metric) != 2:
+        raise ValueError(
+            'Parameter "metric" must have size 2 for x and y respectively.'
+        )
+    if metric is None:
+        assert d.ndim == 2 and d.shape[0] == d.shape[1]
+        assert (d.index == d.columns).all()
+        assert method[0] == method[1]
+        if xselect is not None:
+            assert yselect is not None
+            assert (xselect == yselect).all()
+        else:
+            assert yselect is None
+    if dshow is None:
+        dshow = d
+    assert (
+        dshow.shape == d.shape
+        and (dshow.index == d.index).all()
+        and (dshow.columns == d.columns).all()
+    )
+    xt0 = d.columns if isinstance(xtick, bool) else xtick
+    yt0 = d.index if isinstance(ytick, bool) else ytick
+    # Genes to highlight
+    d2 = d.copy()
+    if xselect is not None:
+        d2 = d2.loc[:, xselect]
+        dshow = dshow.loc[:, xselect]
+        xt0 = [xt0[x] for x in np.nonzero(xselect)[0]]
+    if yselect is not None:
+        d2 = d2.loc[yselect]
+        dshow = dshow.loc[yselect]
+        yt0 = [yt0[x] for x in np.nonzero(yselect)[0]]
 
-	d3 = dshow.copy()
-	if metric is not None:
-		# Right dendrogram
-		if dright > 0:
-			ax1 = fig.add_axes([
-				1 - wedge * (1 + iscolorbar) - wright - wcolorbar, wedge, wright,
-				1 - 2 * wedge - wtop])
-			tl1 = linkage(d2, method=method[1], metric=metric[1], optimal_ordering=optimal_ordering)
-			td1 = dendrogram(tl1, orientation='right')
-			ax1.set_xticks([])
-			ax1.set_yticks([])
-			d3 = d3.iloc[td1['leaves'], :]
-			yt0 = [yt0[x] for x in td1['leaves']]
-		else:
-			ax1=None
+    wtop = dtop / (1 + d2.shape[0] / 8)
+    wright = dright / (1 + d2.shape[1] * aspect / 8)
+    iscolorbar = wcolorbar > 0
+    t1 = np.array(d2.T.shape)
+    t1 = t1 * figscale
+    t1[1] /= aspect
+    t1[1] /= 1 - wedge * 2 - wtop
+    t1[0] /= 1 - wedge * (2 + iscolorbar) - wright - wcolorbar
+    if fig is None:
+        fig = plt.figure(figsize=t1)
+    d3 = dshow.copy()
+    if metric is not None:
+        # Right dendrogram
+        if dright > 0:
+            ax1 = fig.add_axes(
+                [
+                    1 - wedge * (1 + iscolorbar) - wright - wcolorbar,
+                    wedge,
+                    wright,
+                    1 - 2 * wedge - wtop,
+                ]
+            )
+            tl1 = linkage(
+                d2,
+                method=method[1],
+                metric=metric[1],
+                optimal_ordering=optimal_ordering,
+            )
+            td1 = dendrogram(tl1, orientation="right")
+            ax1.set_xticks([])
+            ax1.set_yticks([])
+            d3 = d3.iloc[td1["leaves"], :]
+            yt0 = [yt0[x] for x in td1["leaves"]]
+        else:
+            ax1 = None
+        # Top dendrogram
+        if dtop > 0:
+            ax2 = fig.add_axes(
+                [
+                    wedge,
+                    1 - wedge - wtop,
+                    1 - wedge * (2 + iscolorbar) - wright - wcolorbar,
+                    wtop,
+                ]
+            )
+            tl2 = linkage(
+                d2.T,
+                method=method[0],
+                metric=metric[0],
+                optimal_ordering=optimal_ordering,
+            )
+            td2 = dendrogram(tl2)
+            ax2.set_xticks([])
+            ax2.set_yticks([])
+            d3 = d3.iloc[:, td2["leaves"]]
+            xt0 = [xt0[x] for x in td2["leaves"]]
+        else:
+            ax2 = None
+    else:
+        if dright > 0 or dtop > 0:
+            from scipy.spatial.distance import squareform
 
-		# Top dendrogram
-		if dtop > 0:
-			ax2 = fig.add_axes([wedge, 1 - wedge - wtop, 1 - wedge * (2 + iscolorbar) - wright - wcolorbar, wtop])
-			tl2 = linkage(d2.T, method=method[0], metric=metric[0], optimal_ordering=optimal_ordering)
-			td2 = dendrogram(tl2)
-			ax2.set_xticks([])
-			ax2.set_yticks([])
-			d3 = d3.iloc[:, td2['leaves']]
-			xt0 = [xt0[x] for x in td2['leaves']]
-		else:
-			ax2=None
-	else:
-		if dright > 0 or dtop > 0:
-			from scipy.spatial.distance import squareform
-			tl1 = linkage(squareform(d2), method=method[0], optimal_ordering=optimal_ordering)
-			# Right dendrogram
-			if dright > 0:
-				ax1 = fig.add_axes([
-					1 - wedge * (1 + iscolorbar) - wright - wcolorbar, wedge, wright,
-					1 - 2 * wedge - wtop])
-				td1 = dendrogram(tl1, orientation='right')
-				ax1.set_xticks([])
-				ax1.set_yticks([])
-			else:
-				ax1=None
-				td1=None
-			# Top dendrogram
-			if dtop > 0:
-				ax2 = fig.add_axes([wedge, 1 - wedge - wtop, 1 - wedge * (2 + iscolorbar) - wright - wcolorbar, wtop])
-				td2 = dendrogram(tl1)
-				ax2.set_xticks([])
-				ax2.set_yticks([])
-			else:
-				ax2=None
-				td2=None
-			td0=td1['leaves'] if td1 is not None else td2['leaves']
-			d3 = d3.iloc[td0,:].iloc[:,td0]
-			xt0,yt0 = [[y[x] for x in td0] for y in [xt0,yt0]]
-	axmatrix = fig.add_axes([
-		wedge, wedge, 1 - wedge * (2 + iscolorbar) - wright - wcolorbar,
-		1 - 2 * wedge - wtop])
-	ka = {'aspect': 1 / aspect, 'origin': 'lower', 'cmap': cmap}
-	if vmin is not None:
-		ka['vmin'] = vmin
-	if vmax is not None:
-		ka['vmax'] = vmax
-	im = axmatrix.matshow(d3, **ka)
-	if not isinstance(xtick,bool) or xtick:
-		t1 = list(zip(range(d3.shape[1]), xt0))
-		t1 = list(zip(*list(filter(lambda x: x[1] is not None, t1))))
-		axmatrix.set_xticks(t1[0])
-		axmatrix.set_xticklabels(t1[1], minor=False, rotation=90)
-	else:
-		axmatrix.set_xticks([])
-	if not isinstance(ytick,bool)or ytick:
-		t1 = list(zip(range(d3.shape[0]), yt0))
-		t1 = list(zip(*list(filter(lambda x: x[1] is not None, t1))))
-		axmatrix.set_yticks(t1[0])
-		axmatrix.set_yticklabels(t1[1], minor=False)
-	else:
-		axmatrix.set_yticks([])
-
-	axmatrix.tick_params(top=False,
-		bottom=True,
-		labeltop=False,
-		labelbottom=True,
-		left=True,
-		labelleft=True,
-		right=False,
-		labelright=False)
-	if inverty:
-		if ax1 is not None:
-			ax1.set_ylim(ax1.get_ylim()[::-1])
-		axmatrix.set_ylim(axmatrix.get_ylim()[::-1])
-	if wcolorbar > 0:
-		cax = fig.add_axes([
-			1 - wedge - wcolorbar, wedge, wcolorbar, 1 - 2 * wedge - wtop])
-		fig.colorbar(im, cax=cax)
-
-	return fig, d3.columns, d3.index
+            tl1 = linkage(
+                squareform(d2), method=method[0], optimal_ordering=optimal_ordering
+            )
+            # Right dendrogram
+            if dright > 0:
+                ax1 = fig.add_axes(
+                    [
+                        1 - wedge * (1 + iscolorbar) - wright - wcolorbar,
+                        wedge,
+                        wright,
+                        1 - 2 * wedge - wtop,
+                    ]
+                )
+                td1 = dendrogram(tl1, orientation="right")
+                ax1.set_xticks([])
+                ax1.set_yticks([])
+            else:
+                ax1 = None
+                td1 = None
+            # Top dendrogram
+            if dtop > 0:
+                ax2 = fig.add_axes(
+                    [
+                        wedge,
+                        1 - wedge - wtop,
+                        1 - wedge * (2 + iscolorbar) - wright - wcolorbar,
+                        wtop,
+                    ]
+                )
+                td2 = dendrogram(tl1)
+                ax2.set_xticks([])
+                ax2.set_yticks([])
+            else:
+                ax2 = None
+                td2 = None
+            td0 = td1["leaves"] if td1 is not None else td2["leaves"]
+            d3 = d3.iloc[td0, :].iloc[:, td0]
+            xt0, yt0 = [[y[x] for x in td0] for y in [xt0, yt0]]
+    axmatrix = fig.add_axes(
+        [
+            wedge,
+            wedge,
+            1 - wedge * (2 + iscolorbar) - wright - wcolorbar,
+            1 - 2 * wedge - wtop,
+        ]
+    )
+    ka = {"aspect": 1 / aspect, "origin": "lower", "cmap": cmap}
+    if vmin is not None:
+        ka["vmin"] = vmin
+    if vmax is not None:
+        ka["vmax"] = vmax
+    im = axmatrix.matshow(d3, **ka)
+    if not isinstance(xtick, bool) or xtick:
+        t1 = list(zip(range(d3.shape[1]), xt0))
+        t1 = list(zip(*list(filter(lambda x: x[1] is not None, t1))))
+        axmatrix.set_xticks(t1[0])
+        axmatrix.set_xticklabels(t1[1], minor=False, rotation=90)
+    else:
+        axmatrix.set_xticks([])
+    if not isinstance(ytick, bool) or ytick:
+        t1 = list(zip(range(d3.shape[0]), yt0))
+        t1 = list(zip(*list(filter(lambda x: x[1] is not None, t1))))
+        axmatrix.set_yticks(t1[0])
+        axmatrix.set_yticklabels(t1[1], minor=False)
+    else:
+        axmatrix.set_yticks([])
+    axmatrix.tick_params(
+        top=False,
+        bottom=True,
+        labeltop=False,
+        labelbottom=True,
+        left=True,
+        labelleft=True,
+        right=False,
+        labelright=False,
+    )
+    if inverty:
+        if ax1 is not None:
+            ax1.set_ylim(ax1.get_ylim()[::-1])
+        axmatrix.set_ylim(axmatrix.get_ylim()[::-1])
+    if wcolorbar > 0:
+        cax = fig.add_axes(
+            [1 - wedge - wcolorbar, wedge, wcolorbar, 1 - 2 * wedge - wtop]
+        )
+        fig.colorbar(im, cax=cax)
+    return fig, d3.columns, d3.index
 
 def fig_expression_gradient_heatmap(
     network: dictys.net.dynamic_network,
@@ -979,17 +776,21 @@ def fig_expression_gradient_heatmap(
     dist: float = 1.5,
     ax: Optional[matplotlib.axes.Axes] = None,
     cmap: Union[str, matplotlib.cm.ScalarMappable] = "coolwarm",
-    figsize: Tuple[float, float] = (2, 0.15)
-) -> Tuple[matplotlib.pyplot.Figure, matplotlib.axes.Axes, matplotlib.cm.ScalarMappable]:
+    figsize: Tuple[float, float] = (2, 0.15),
+) -> Tuple[
+    matplotlib.pyplot.Figure, matplotlib.axes.Axes, matplotlib.cm.ScalarMappable
+]:
     """
     Draws pseudo-time dependent heatmap of expression gradients.
     """
     # Get expression data
-    pts,fsmooth=network.linspace(start,stop,num,dist)
-    stat1_y=fsmooth(stat.lcpm(network,cut=0))
-    stat1_x=stat.pseudotime(network,pts)
-    dy=pd.DataFrame(stat1_y.compute(pts),index=stat1_y.names[0])
-    dx=pd.Series(stat1_x.compute(pts)[0]) #gene1's pseudotime is used as all genes have the same pseudotime
+    pts, fsmooth = network.linspace(start, stop, num, dist)
+    stat1_y = fsmooth(stat.lcpm(network, cut=0))
+    stat1_x = stat.pseudotime(network, pts)
+    dy = pd.DataFrame(stat1_y.compute(pts), index=stat1_y.names[0])
+    dx = pd.Series(
+        stat1_x.compute(pts)[0]
+    )  # gene1's pseudotime is used as all genes have the same pseudotime
     # Determine if input is gene list or regulation list
     if isinstance(genes_or_regulations[0], tuple):
         # Extract target genes from regulations
@@ -1000,10 +801,9 @@ def fig_expression_gradient_heatmap(
         # Use gene list directly
         target_genes = list(dict.fromkeys(genes_or_regulations))
     # Calculate gradients for target genes
-    gradients = np.vstack([
-        np.gradient(dy.loc[gene].values, dx.values) 
-        for gene in target_genes
-    ])
+    gradients = np.vstack(
+        [np.gradient(dy.loc[gene].values, dx.values) for gene in target_genes]
+    )
     # Create figure and axes
     if ax is None:
         figsize = (figsize[0], figsize[1] * len(target_genes))
@@ -1017,13 +817,12 @@ def fig_expression_gradient_heatmap(
     if isinstance(cmap, str):
         vmax = np.quantile(np.abs(gradients).ravel(), 0.95)
         cmap = matplotlib.cm.ScalarMappable(
-            norm=matplotlib.colors.Normalize(vmin=-vmax, vmax=vmax), 
-            cmap=cmap
+            norm=matplotlib.colors.Normalize(vmin=-vmax, vmax=vmax), cmap=cmap
         )
     if hasattr(cmap, "to_rgba"):
-        im = ax.imshow(cmap.to_rgba(gradients), aspect=aspect, interpolation='none')
+        im = ax.imshow(cmap.to_rgba(gradients), aspect=aspect, interpolation="none")
     else:
-        im = ax.imshow(gradients, aspect=aspect, interpolation='none', cmap=cmap)
+        im = ax.imshow(gradients, aspect=aspect, interpolation="none", cmap=cmap)
         plt.colorbar(im, label="Expression gradient (Δ Log CPM/Δ Pseudotime)")
     # Set pseudotime labels as x axis labels
     ax.set_xlabel("Pseudotime")
@@ -1038,19 +837,19 @@ def fig_expression_gradient_heatmap(
     # Add grid lines to separate rows
     ax.set_yticks(np.arange(len(target_genes) + 1) - 0.5, minor=True)
     ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
-    return fig, ax, cmap 
+    return fig, ax, cmap
 
 def fig_clustered_expression_gradient_heatmap(
     network: dictys.net.dynamic_network,
     start: int,
     stop: int,
     genes_or_regulations: Union[list[str], list[Tuple[str, str]]],
-    dchar: pd.DataFrame,  
+    dchar: pd.DataFrame,
     num: int = 100,
     dist: float = 0.0005,
     cmap: str = "RdYlGn",
     figsize: Optional[Tuple[float, float]] = None,
-    dright: float = 0.3
+    dright: float = 0.3,
 ) -> Tuple[plt.Figure, np.ndarray, list]:
     """
     Draws heatmap of expression gradients, ordering genes by their switching times.
@@ -1070,12 +869,16 @@ def fig_clustered_expression_gradient_heatmap(
     seen = set()
     target_genes = [x for x in target_genes if not (x in seen or seen.add(x))]
     # Calculate gradients
-    gradients_list = [np.gradient(dy.loc[gene].values, dx.values) for gene in target_genes]
+    gradients_list = [
+        np.gradient(dy.loc[gene].values, dx.values) for gene in target_genes
+    ]
     gradients = np.vstack(gradients_list)
     # Sort genes by switching time, but maintain correct order mapping
-    switching_times = dchar.loc[target_genes]['Switching time']
+    switching_times = dchar.loc[target_genes]["Switching time"]
     sorted_indices = switching_times.sort_values().index
-    ordered_genes = list(dict.fromkeys(sorted_indices))  # Remove duplicates while preserving order
+    ordered_genes = list(
+        dict.fromkeys(sorted_indices)
+    )  # Remove duplicates while preserving order
     # Create a mapping from gene names to their positions in target_genes
     gene_to_idx = {gene: idx for idx, gene in enumerate(target_genes)}
     # Reorder gradients using the mapping
@@ -1090,19 +893,26 @@ def fig_clustered_expression_gradient_heatmap(
     bottom_margin = 0.1  # For pseudotime label
     top_margin = 0.05
     # Create main heatmap axes
-    ax_heatmap = fig.add_axes([left_margin, bottom_margin, 
-                              1 - left_margin - right_margin - 0.1, 
-                              1 - bottom_margin - top_margin])
+    ax_heatmap = fig.add_axes(
+        [
+            left_margin,
+            bottom_margin,
+            1 - left_margin - right_margin - 0.1,
+            1 - bottom_margin - top_margin,
+        ]
+    )
     # Calculate symmetric vmin/vmax for colormap
     vmax = np.max(np.abs(gradients))
     vmin = -vmax
     # Create heatmap
-    im = ax_heatmap.imshow(gradients, 
-                          aspect='auto',
-                          cmap=cmap,
-                          interpolation='nearest',
-                          vmin=vmin,
-                          vmax=vmax)
+    im = ax_heatmap.imshow(
+        gradients,
+        aspect="auto",
+        cmap=cmap,
+        interpolation="nearest",
+        vmin=vmin,
+        vmax=vmax,
+    )
     # Add gene labels
     ax_heatmap.set_yticks(range(len(ordered_genes)))
     ax_heatmap.set_yticklabels(ordered_genes)
@@ -1110,9 +920,10 @@ def fig_clustered_expression_gradient_heatmap(
     ax_heatmap.set_xticks([])
     ax_heatmap.set_xlabel("Pseudotime", fontsize=10, labelpad=10)
     # Add colorbar
-    cax = fig.add_axes([1 - right_margin + 0.02, bottom_margin, 
-                        0.02, 1 - bottom_margin - top_margin])
-    fig.colorbar(im, cax=cax, label='Expression gradient')
+    cax = fig.add_axes(
+        [1 - right_margin + 0.02, bottom_margin, 0.02, 1 - bottom_margin - top_margin]
+    )
+    fig.colorbar(im, cax=cax, label="Expression gradient")
     # Adjust layout
     plt.tight_layout()
     return fig, gradients, ordered_genes
@@ -1126,8 +937,10 @@ def fig_expression_linear_heatmap(
     dist: float = 1.5,
     ax: Optional[matplotlib.axes.Axes] = None,
     cmap: Union[str, matplotlib.cm.ScalarMappable] = "coolwarm",
-    figsize: Tuple[float, float] = (2, 0.15)
-) -> Tuple[matplotlib.pyplot.Figure, matplotlib.axes.Axes, matplotlib.cm.ScalarMappable]:
+    figsize: Tuple[float, float] = (2, 0.15),
+) -> Tuple[
+    matplotlib.pyplot.Figure, matplotlib.axes.Axes, matplotlib.cm.ScalarMappable
+]:
     """
     Draws pseudo-time dependent heatmap of linear expression values.
     """
@@ -1135,25 +948,18 @@ def fig_expression_linear_heatmap(
     pts, fsmooth = network.linspace(start, stop, num, dist)
     stat1_y = fsmooth(stat.lcpm(network, cut=0))
     stat1_x = stat.pseudotime(network, pts)
-    
     # Get log2 expression values and convert to linear
     dy = pd.DataFrame(stat1_y.compute(pts), index=stat1_y.names[0])
     dx = pd.Series(stat1_x.compute(pts)[0])
     dy_linear = dy.apply(lambda x: 2**x - 1)
-    
     # Get target genes
     if isinstance(genes_or_regulations[0], tuple):
         target_genes = [target for _, target in genes_or_regulations]
         target_genes = list(dict.fromkeys(target_genes))
     else:
         target_genes = list(dict.fromkeys(genes_or_regulations))
-    
     # Stack expression values
-    expression_matrix = np.vstack([
-        dy_linear.loc[gene].values 
-        for gene in target_genes
-    ])
-    
+    expression_matrix = np.vstack([dy_linear.loc[gene].values for gene in target_genes])
     # Create figure and axes
     if ax is None:
         figsize = (figsize[0], figsize[1] * len(target_genes))
@@ -1162,39 +968,141 @@ def fig_expression_linear_heatmap(
     else:
         fig = ax.get_figure()
         figsize = fig.get_size_inches()
-    
-    aspect = (figsize[1] / len(target_genes)) / (figsize[0] / expression_matrix.shape[1])
-    
+    aspect = (figsize[1] / len(target_genes)) / (
+        figsize[0] / expression_matrix.shape[1]
+    )
     # Create heatmap
     if isinstance(cmap, str):
         vmax = np.quantile(expression_matrix.ravel(), 0.95)
         cmap = matplotlib.cm.ScalarMappable(
-            norm=matplotlib.colors.Normalize(vmin=0, vmax=vmax), 
-            cmap=cmap
+            norm=matplotlib.colors.Normalize(vmin=0, vmax=vmax), cmap=cmap
         )
-    
     if hasattr(cmap, "to_rgba"):
-        im = ax.imshow(cmap.to_rgba(expression_matrix), aspect=aspect, interpolation='none')
+        im = ax.imshow(
+            cmap.to_rgba(expression_matrix), aspect=aspect, interpolation="none"
+        )
     else:
-        im = ax.imshow(expression_matrix, aspect=aspect, interpolation='none', cmap=cmap)
+        im = ax.imshow(
+            expression_matrix, aspect=aspect, interpolation="none", cmap=cmap
+        )
         plt.colorbar(im, label="Expression (CPM)")
-    
-
     # Set pseudotime labels with rounded values
     ax.set_xlabel("Pseudotime")
     num_ticks = 10
-    tick_positions = np.linspace(0, expression_matrix.shape[1] - 1, num_ticks, dtype=int)
+    tick_positions = np.linspace(
+        0, expression_matrix.shape[1] - 1, num_ticks, dtype=int
+    )
     tick_labels = dx.iloc[tick_positions]
     ax.set_xticks(tick_positions)
-    ax.set_xticklabels([f"{x:.3f}" for x in tick_labels], rotation=45, ha="right")  # Round to 1 decimal place
-    
+    ax.set_xticklabels(
+        [f"{x:.3f}" for x in tick_labels], rotation=45, ha="right"
+    )  # Round to 1 decimal place
     # Set gene labels
     ax.set_yticks(list(range(len(target_genes))))
     ax.set_yticklabels(target_genes)
-    
     # Add grid lines
     ax.set_yticks(np.arange(len(target_genes) + 1) - 0.5, minor=True)
     ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
-    
     return fig, ax, cmap
 
+def plot_force_heatmap(
+    force_df: pd.DataFrame,
+    dtime: pd.Series,
+    regulations=None,
+    tf_to_targets_dict=None,
+    ax: Optional[matplotlib.axes.Axes] = None,
+    cmap: Union[str, matplotlib.cm.ScalarMappable] = "coolwarm",
+    figsize: Tuple[float, float] = (10, 4),
+    vmax: Optional[float] = None,
+) -> Tuple[matplotlib.pyplot.Figure, matplotlib.axes.Axes, np.ndarray]:
+    """
+    Draws pseudo-time dependent heatmap of force values.
+    """
+    # Process input parameters to generate regulation pairs
+    reg_pairs = []
+    reg_labels = []
+    # Case 1: Dictionary of TF -> targets provided
+    if tf_to_targets_dict is not None:
+        for tf, targets in tf_to_targets_dict.items():
+            for target in targets:
+                reg_pairs.append((tf, target))
+                reg_labels.append(f"{tf}->{target}")
+    # Case 2: List of regulation pairs or list of targets for a single TF
+    elif regulations is not None:
+        # Check if first item is a string (target) or tuple/list (regulation pair)
+        if regulations and isinstance(regulations[0], str):
+            # It's a list of targets for a single TF
+            # Extract TF name from the calling context (not ideal but works for the notebook)
+            for key, value in locals().items():
+                if (
+                    isinstance(value, dict)
+                    and "PRDM1" in value
+                    and value["PRDM1"] == regulations
+                ):
+                    tf = "PRDM1"  # Found the TF
+                    break
+            else:
+                # If we can't determine the TF, use the first item in regulations as TF
+                # and the rest as targets (this is a fallback and might not be correct)
+                tf = regulations[0]
+                regulations = regulations[1:]
+
+            for target in regulations:
+                reg_pairs.append((tf, target))
+                reg_labels.append(f"{tf}->{target}")
+        else:
+            # It's a list of regulation pairs
+            reg_pairs = regulations
+            reg_labels = [f"{tf}->{target}" for tf, target in regulations]
+    # If no regulations provided, use non-zero regulations from force_df
+    if not reg_pairs:
+        non_zero_mask = (force_df != 0).any(axis=1)
+        force_df_filtered = force_df[non_zero_mask]
+        reg_pairs = list(force_df_filtered.index)
+        reg_labels = [f"{tf}->{target}" for tf, target in reg_pairs]
+    # Extract force values for the specified regulations
+    force_values = []
+    for pair in reg_pairs:
+        tf, target = pair
+        try:
+            force_values.append(force_df.loc[(tf, target)].values)
+        except KeyError:
+            raise ValueError(f"Regulation {tf}->{target} not found in force DataFrame")
+    # Convert to numpy array
+    dnet = np.array(force_values)
+    # Create figure and axes
+    if ax is None:
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111)
+    else:
+        fig = ax.get_figure()
+    # Determine and apply colormap
+    if isinstance(cmap, str):
+        if vmax is None:
+            vmax = np.quantile(np.abs(dnet).ravel(), 0.95)
+        cmap = matplotlib.cm.ScalarMappable(
+            norm=matplotlib.colors.Normalize(vmin=-vmax, vmax=vmax), cmap=cmap
+        )
+    elif vmax is not None:
+        raise ValueError(
+            "vmax should not be set if cmap is a matplotlib.cm.ScalarMappable."
+        )
+    if hasattr(cmap, "to_rgba"):
+        im = ax.imshow(cmap.to_rgba(dnet), aspect="auto", interpolation="none")
+    else:
+        im = ax.imshow(dnet, aspect="auto", interpolation="none", cmap=cmap)
+        plt.colorbar(im, label="Force")
+    # Set pseudotime labels
+    ax.set_xlabel("Pseudotime")
+    num_ticks = 10
+    tick_positions = np.linspace(0, dnet.shape[1] - 1, num_ticks, dtype=int)
+    tick_labels = dtime.iloc[tick_positions]
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels([f"{x:.4f}" for x in tick_labels], rotation=45, ha="right")
+    # Set regulation pair labels
+    ax.set_yticks(list(range(len(reg_labels))))
+    ax.set_yticklabels(reg_labels)
+    # Add grid lines
+    ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
+    plt.tight_layout()
+    return fig, ax, dnet
