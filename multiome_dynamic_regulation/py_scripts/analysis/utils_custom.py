@@ -6,6 +6,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import math
 from dictys.net import stat
 from dictys.utils.numpy import ArrayLike, NDArray
 from joblib import Memory
@@ -447,7 +448,6 @@ def fig_regulation_heatmap(
 ]:
     """
     Draws pseudo-time dependent heatmap of regulation strengths without clustering.
-    Maintains the original order of regulation pairs as provided in the input list.
     """
     # Get dynamic network edge strength
     pts, fsmooth = network.linspace(start, stop, num, dist)
@@ -839,95 +839,6 @@ def fig_expression_gradient_heatmap(
     ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
     return fig, ax, cmap
 
-def fig_clustered_expression_gradient_heatmap(
-    network: dictys.net.dynamic_network,
-    start: int,
-    stop: int,
-    genes_or_regulations: Union[list[str], list[Tuple[str, str]]],
-    dchar: pd.DataFrame,
-    num: int = 100,
-    dist: float = 0.0005,
-    cmap: str = "RdYlGn",
-    figsize: Optional[Tuple[float, float]] = None,
-    dright: float = 0.3,
-) -> Tuple[plt.Figure, np.ndarray, list]:
-    """
-    Draws heatmap of expression gradients, ordering genes by their switching times.
-    """
-    # Get expression data
-    pts, fsmooth = network.linspace(start, stop, num, dist)
-    stat1_y = fsmooth(stat.lcpm(network, cut=0))
-    stat1_x = stat.pseudotime(network, pts)
-    dy = pd.DataFrame(stat1_y.compute(pts), index=stat1_y.names[0])
-    dx = pd.Series(stat1_x.compute(pts)[0])
-    # Extract and deduplicate target genes
-    if isinstance(genes_or_regulations[0], tuple):
-        target_genes = [target for _, target in genes_or_regulations]
-    else:
-        target_genes = genes_or_regulations
-    # Remove duplicates while preserving order
-    seen = set()
-    target_genes = [x for x in target_genes if not (x in seen or seen.add(x))]
-    # Calculate gradients
-    gradients_list = [
-        np.gradient(dy.loc[gene].values, dx.values) for gene in target_genes
-    ]
-    gradients = np.vstack(gradients_list)
-    # Sort genes by switching time, but maintain correct order mapping
-    switching_times = dchar.loc[target_genes]["Switching time"]
-    sorted_indices = switching_times.sort_values().index
-    ordered_genes = list(
-        dict.fromkeys(sorted_indices)
-    )  # Remove duplicates while preserving order
-    # Create a mapping from gene names to their positions in target_genes
-    gene_to_idx = {gene: idx for idx, gene in enumerate(target_genes)}
-    # Reorder gradients using the mapping
-    gradients = gradients[[gene_to_idx[gene] for gene in ordered_genes]]
-    # Set up the figure
-    if figsize is None:
-        figsize = (10, len(target_genes) * 0.3)
-    fig = plt.figure(figsize=figsize)
-    # Calculate margins
-    left_margin = 0.3  # For gene names
-    right_margin = dright  # For colorbar
-    bottom_margin = 0.1  # For pseudotime label
-    top_margin = 0.05
-    # Create main heatmap axes
-    ax_heatmap = fig.add_axes(
-        [
-            left_margin,
-            bottom_margin,
-            1 - left_margin - right_margin - 0.1,
-            1 - bottom_margin - top_margin,
-        ]
-    )
-    # Calculate symmetric vmin/vmax for colormap
-    vmax = np.max(np.abs(gradients))
-    vmin = -vmax
-    # Create heatmap
-    im = ax_heatmap.imshow(
-        gradients,
-        aspect="auto",
-        cmap=cmap,
-        interpolation="nearest",
-        vmin=vmin,
-        vmax=vmax,
-    )
-    # Add gene labels
-    ax_heatmap.set_yticks(range(len(ordered_genes)))
-    ax_heatmap.set_yticklabels(ordered_genes)
-    # Remove x-axis ticks but keep label
-    ax_heatmap.set_xticks([])
-    ax_heatmap.set_xlabel("Pseudotime", fontsize=10, labelpad=10)
-    # Add colorbar
-    cax = fig.add_axes(
-        [1 - right_margin + 0.02, bottom_margin, 0.02, 1 - bottom_margin - top_margin]
-    )
-    fig.colorbar(im, cax=cax, label="Expression gradient")
-    # Adjust layout
-    plt.tight_layout()
-    return fig, gradients, ordered_genes
-
 def fig_expression_linear_heatmap(
     network: dictys.net.dynamic_network,
     start: int,
@@ -1106,3 +1017,48 @@ def plot_force_heatmap(
     ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
     plt.tight_layout()
     return fig, ax, dnet
+
+def plot_expression_for_multiple_genes(targets_in_lf, lcpm_dcurve, dtime, ncols=3, figsize=(18, 15)):
+    """
+    Plots expression curves for multiple target genes in a single figure.
+    """
+    # Calculate number of rows needed
+    n_targets = len(targets_in_lf)
+    nrows = math.ceil(n_targets / ncols)
+    
+    # Create figure and subplots
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
+    axes = axes.flatten() if n_targets > 1 else [axes]  # Handle case of single subplot
+    
+    # Loop through each target gene
+    for i, gene in enumerate(targets_in_lf):
+        ax = axes[i]
+        
+        # Check if gene exists in lcpm_dcurve
+        if gene in lcpm_dcurve.index:
+            # Plot expression curve
+            line = ax.plot(dtime, lcpm_dcurve.loc[gene], linewidth=2, color='green')
+            
+            # Add label at the end of the line
+            ax.text(dtime.iloc[-1], lcpm_dcurve.loc[gene].iloc[-1], f' {gene}', 
+                   color='green', verticalalignment='center')
+            
+            # Set title and labels
+            ax.set_title(gene)
+            ax.set_xlabel('Pseudotime')
+            ax.set_ylabel('Log CPM')
+            
+            # Remove top and right spines
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+        else:
+            ax.text(0.5, 0.5, f"{gene} not found", 
+                   horizontalalignment='center', verticalalignment='center')
+            ax.axis('off')
+    # Hide any unused subplots
+    for j in range(i+1, len(axes)):
+        axes[j].axis('off')
+    # Adjust layout
+    plt.tight_layout()
+    plt.suptitle('Expression Curves for Target Genes', fontsize=16, y=1.02)
+    return fig
