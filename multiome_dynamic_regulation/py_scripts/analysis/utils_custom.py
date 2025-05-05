@@ -249,6 +249,39 @@ def get_top_k_fraction_labels(dictys_dynamic_object, window_idx, cell_labels, k=
     )
     return sorted_states[:k]
 
+def window_labels_to_count_df(window_labels_dict):
+    """
+    Converts a dictionary of window indices to cell labels into a DataFrame
+    with counts of each label per window.
+    """
+    import pandas as pd
+    from collections import Counter
+    
+    # Get all unique labels
+    all_labels = set()
+    for labels in window_labels_dict.values():
+        all_labels.update(labels)
+    
+    # Sort labels for consistency
+    all_labels = sorted(all_labels)
+    
+    # Get all window indices
+    window_indices = sorted(window_labels_dict.keys())
+    
+    # Initialize DataFrame with zeros
+    count_df = pd.DataFrame(0, index=all_labels, columns=window_indices)
+    
+    # Fill in the counts for each window
+    for window_idx, labels in window_labels_dict.items():
+        # Count occurrences of each label in this window
+        label_counts = Counter(labels)
+        
+        # Update the DataFrame
+        for label, count in label_counts.items():
+            count_df.loc[label, window_idx] = count
+    
+    return count_df
+
 
 ##################################### Curve computation ############################################
 
