@@ -1,5 +1,7 @@
 multiome_dynamic_regulation/tutorial_notebooks/
 multiome_dynamic_regulation/py_scripts/analysis/cache_directory
+multiome_dynamic_regulation/py_scripts/analysis/mouse_skin_analysis.ipynb
+multiome_dynamic_regulation/py_scripts/analysis/lineage_defining_tfs/
 perturb_seq_gears/
 pseudotime_methods/
 *.log
