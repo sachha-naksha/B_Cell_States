@@ -1,4 +1,10 @@
+import gc
+import math
+import multiprocessing as mp
 import os
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from functools import partial
 from typing import Optional, Tuple, Union
 
 import dictys
@@ -6,28 +12,12 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import math
 from dictys.net import stat
 from dictys.utils.numpy import ArrayLike, NDArray
 from joblib import Memory
 from scipy import stats
-import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from functools import partial
-import time
+from scipy.stats import hypergeom
 from tqdm import tqdm
-import gc
-
-# keep the object cached for debugging
-memory = Memory(location="cache_directory", verbose=0)
-@memory.cache
-def load_dynamic_object(dynamic_object_path):
-    """
-    Load the dynamic object from the given path
-    """
-    dynamic_object = dictys.net.dynamic_network.from_file(dynamic_object_path)
-    return dynamic_object
-
 
 ######################### Indices retrieval #########################
 
@@ -56,6 +46,7 @@ def get_tf_indices(dictys_dynamic_object, tf_list):
             missing_tfs.append(gene)  # Gene not found at all
     return tf_indices, tf_gene_indices, missing_tfs
 
+
 def get_gene_indices(dictys_dynamic_object, gene_list):
     """
     Get the indices of target genes from a list, if present in ndict and nids[1].
@@ -66,6 +57,7 @@ def get_gene_indices(dictys_dynamic_object, gene_list):
         if gene in gene_hashmap:
             gene_indices.append(gene_hashmap[gene])
     return gene_indices
+
 
 def check_if_gene_in_ndict(dictys_dynamic_object, gene_name, return_index=False):
     """
@@ -220,6 +212,7 @@ def get_state_labels_in_window(dictys_dynamic_object, cell_labels):
         ]
     return state_labels_in_window
 
+
 def get_state_total_counts(cell_labels):
     """
     Get total number of cells for each state in the dataset
@@ -228,6 +221,7 @@ def get_state_total_counts(cell_labels):
     for label in cell_labels:
         state_counts[label] = state_counts.get(label, 0) + 1
     return state_counts
+
 
 def get_top_k_fraction_labels(dictys_dynamic_object, window_idx, cell_labels, k=2):
     """
@@ -256,37 +250,39 @@ def get_top_k_fraction_labels(dictys_dynamic_object, window_idx, cell_labels, k=
     )
     return sorted_states[:k]
 
+
 def window_labels_to_count_df(window_labels_dict):
     """
     Converts a dictionary of window indices to cell labels into a DataFrame
     with counts of each label per window.
     """
-    import pandas as pd
     from collections import Counter
-    
+
+    import pandas as pd
+
     # Get all unique labels
     all_labels = set()
     for labels in window_labels_dict.values():
         all_labels.update(labels)
-    
+
     # Sort labels for consistency
     all_labels = sorted(all_labels)
-    
+
     # Get all window indices
     window_indices = sorted(window_labels_dict.keys())
-    
+
     # Initialize DataFrame with zeros
     count_df = pd.DataFrame(0, index=all_labels, columns=window_indices)
-    
+
     # Fill in the counts for each window
     for window_idx, labels in window_labels_dict.items():
         # Count occurrences of each label in this window
         label_counts = Counter(labels)
-        
+
         # Update the DataFrame
         for label, count in label_counts.items():
             count_df.loc[label, window_idx] = count
-    
+
     return count_df
 
 
@@ -325,6 +321,7 @@ def compute_expression_regulation_curves(
     )  # first gene's pseudotime is taken as all genes have the same pseudotime
     return dy, dx
 
+
 def auc(dx: NDArray[float], dy: NDArray[float]) -> NDArray[float]:
     """
     Computes area under the curves.
@@ -335,6 +332,7 @@ def auc(dx: NDArray[float], dy: NDArray[float]) -> NDArray[float]:
     dymean = (dy[:, 1:] + dy[:, :-1]) / 2
     ans = dymean @ dxdiff
     return ans
+
 
 def _dynamic_network_char_transient_logfc_(
     dx: NDArray[float], dy: NDArray[float]
@@ -352,6 +350,7 @@ def _dynamic_network_char_transient_logfc_(
     )
     return auc(dx, dy)
 
+
 def _dynamic_network_char_switching_time_(
     dx: NDArray[float], dy: NDArray[float]
 ) -> NDArray[float]:
@@ -368,6 +367,7 @@ def _dynamic_network_char_switching_time_(
     )
     return (auc(dx, (dy.T - dy[:, -1]).T)) / (dy[:, 0] - dy[:, -1] + 1e-300)
 
+
 def _dynamic_network_char_terminal_logfc_(
     dx: NDArray[float], dy: NDArray[float]
 ) -> NDArray[float]:
@@ -377,6 +377,7 @@ def _dynamic_network_char_terminal_logfc_(
     if len(dx) < 2 or not (dx[1:] > dx[:-1]).all():
         raise ValueError("dx must be increasing and have at least 2 values.")
     return dy[:, -1] - dy[:, 0]
+
 
 def compute_curve_characteristics(dcurve, dtime):
     """
@@ -396,6 +397,7 @@ def compute_curve_characteristics(dcurve, dtime):
     dchar.set_index(dcurve.index, inplace=True, drop=True)
     return dchar
 
+
 def get_curvature_of_expression(dcurve: pd.DataFrame, dtime: pd.Series):
     """
     Calculate the curvature of expression curves.
@@ -409,6 +411,7 @@ def get_curvature_of_expression(dcurve: pd.DataFrame, dtime: pd.Series):
         np.gradient(dx_dt, dtime, axis=1), index=dcurve.index, columns=dcurve.columns
     )
     return d2x_dt2
+
 
 def calculate_force_curves(
     beta_curves: pd.DataFrame, tf_expression: pd.Series
@@ -468,75 +471,21 @@ def get_unique_regs_by_target(max_force_df):
         tf_target_pairs_per_gene[target] = tf_target_pairs
     return tf_target_pairs_per_gene
 
-def filter_chunk_of_edges(chunk_data, min_nonzero_timepoints=3, alpha=0.05, min_observations=3, check_direction_invariance=True):
-    """
-    Process a chunk of edges for significance testing and direction invariance.
-    
-    Parameters:
-        chunk_data (list): List of (index, row_values) tuples
-        check_direction_invariance (bool): Whether to check for direction invariance
-        
-    Returns:
-        list: List of (index, keep_row, p_value) tuples
-    """
-    results = []
-    
-    for idx, row in chunk_data:
-        # Count non-zero time points
-        nonzero_count = (row != 0).sum()
-        
-        # Check if row has enough non-zero time points
-        if nonzero_count < min_nonzero_timepoints:
-            results.append((idx, False, np.nan))
-            continue
-        
-        # Check direction invariance (same sign across all time points)
-        if check_direction_invariance:
-            # Get non-zero values to check signs
-            nonzero_values = row[row != 0]
-            if len(nonzero_values) > 1:
-                # Check if all non-zero values have the same sign
-                signs = np.sign(nonzero_values)
-                if not np.all(signs == signs.iloc[0]):
-                    results.append((idx, False, np.nan))
-                    continue
-        
-        # Check if we have enough observations for t-test
-        row_clean = row.dropna()
-        if len(row_clean) < min_observations:
-            results.append((idx, False, np.nan))
-            continue
-        
-        # Perform one-sample t-test against 0
-        try:
-            t_stat, p_value = stats.ttest_1samp(row_clean, 0)
-            keep_row = p_value < alpha
-            results.append((idx, keep_row, p_value))
-        except Exception as e:
-            # Handle any numerical issues
-            results.append((idx, False, np.nan))
-    
-    return results
-
-def create_chunks(data, chunk_size):
-    """Create chunks from data list."""
-    for i in range(0, len(data), chunk_size):
-        yield data[i:i + chunk_size]
 
 def filter_edges_by_significance_and_direction(
-    df, 
-    min_nonzero_timepoints=3, 
+    df,
+    min_nonzero_timepoints=3,
     alpha=0.05,
     min_observations=3,
     check_direction_invariance=True,
     n_processes=None,
     chunk_size=10000,
     save_intermediate=False,
-    intermediate_path=None
+    intermediate_path=None,
 ):
     """
     Filter edges for significance and direction invariance using chunked multiprocessing.
-    
+
     Parameters:
         df (pd.DataFrame): DataFrame with TF-Target as index and time points as columns
         min_nonzero_timepoints (int): Minimum number of non-zero time points required
@@ -547,50 +496,60 @@ def filter_edges_by_significance_and_direction(
         chunk_size (int): Number of rows to process per chunk
         save_intermediate (bool): Whether to save intermediate results
         intermediate_path (str): Path to save intermediate results
-    
+
     Returns:
         pd.DataFrame: Filtered DataFrame with p-values added
     """
-    
+
     if n_processes is None:
         n_processes = min(mp.cpu_count(), 16)  # Cap at 16 to avoid memory issues
-    
+
     print(f"Processing {len(df):,} rows using {n_processes} processes...")
     print(f"Chunk size: {chunk_size:,} rows")
-    print(f"Direction invariance check: {'Enabled' if check_direction_invariance else 'Disabled'}")
-    
+    print(
+        f"Direction invariance check: {'Enabled' if check_direction_invariance else 'Disabled'}"
+    )
+
     start_time = time.time()
-    
+
     # Identify time columns (exclude p_value if it exists)
-    time_cols = [col for col in df.columns if col != 'p_value']
+    time_cols = [col for col in df.columns if col != "p_value"]
     print(f"Time columns: {time_cols}")
-    
-    # Convert DataFrame to list of tuples for processing (only time columns)
-    print("Converting DataFrame to processing format...")
-    row_data = [(idx, row[time_cols]) for idx, row in df.iterrows()]
-    
-    # Create chunks
-    chunks = list(create_chunks(row_data, chunk_size))
-    total_chunks = len(chunks)
-    print(f"Created {total_chunks} chunks")
-    
-    # Create partial function
+
+    # Create chunks of indices directly (much more memory efficient)
+    print("Creating index chunks...")
+    total_rows = len(df)
+    index_chunks = []
+
+    for i in range(0, total_rows, chunk_size):
+        end_idx = min(i + chunk_size, total_rows)
+        chunk_indices = df.index[i:end_idx]
+        index_chunks.append(chunk_indices)
+
+    total_chunks = len(index_chunks)
+    print(f"Created {total_chunks} chunks of indices")
+
+    # Create partial function that takes DataFrame and indices
     process_func = partial(
         filter_chunk_of_edges,
+        df=df,
+        time_cols=time_cols,
         min_nonzero_timepoints=min_nonzero_timepoints,
         alpha=alpha,
         min_observations=min_observations,
-        check_direction_invariance=check_direction_invariance
+        check_direction_invariance=check_direction_invariance,
     )
-    
+
     # Process chunks with progress tracking
     all_results = []
-    
+
     with ProcessPoolExecutor(max_workers=n_processes) as executor:
         # Submit all chunks
-        future_to_chunk = {executor.submit(process_func, chunk): i 
-                          for i, chunk in enumerate(chunks)}
-        
+        future_to_chunk = {
+            executor.submit(process_func, chunk_indices): i
+            for i, chunk_indices in enumerate(index_chunks)
+        }
+
         # Process results with progress bar
         with tqdm(total=total_chunks, desc="Processing chunks") as pbar:
             for future in as_completed(future_to_chunk):
@@ -598,111 +557,194 @@ def filter_edges_by_significance_and_direction(
                 try:
                     chunk_results = future.result()
                     all_results.extend(chunk_results)
-                    
+
                     # Optional: save intermediate results
                     if save_intermediate and intermediate_path:
-                        chunk_df = pd.DataFrame(chunk_results, 
-                                              columns=['index', 'keep', 'p_value'])
-                        chunk_df.to_parquet(f"{intermediate_path}_chunk_{chunk_idx}.parquet")
-                    
+                        chunk_df = pd.DataFrame(
+                            chunk_results, columns=["index", "keep", "p_value"]
+                        )
+                        chunk_df.to_parquet(
+                            f"{intermediate_path}_chunk_{chunk_idx}.parquet"
+                        )
+
                 except Exception as exc:
-                    print(f'Chunk {chunk_idx} generated an exception: {exc}')
+                    print(f"Chunk {chunk_idx} generated an exception: {exc}")
                     # Add dummy results for failed chunk
-                    chunk_size_actual = len(chunks[chunk_idx])
-                    dummy_results = [(chunks[chunk_idx][i][0], False, np.nan) 
-                                   for i in range(chunk_size_actual)]
+                    chunk_size_actual = len(index_chunks[chunk_idx])
+                    dummy_results = [
+                        (index_chunks[chunk_idx][i], False, np.nan)
+                        for i in range(chunk_size_actual)
+                    ]
                     all_results.extend(dummy_results)
-                
+
                 pbar.update(1)
-                
+
                 # Periodic garbage collection
                 if len(all_results) % (chunk_size * 10) == 0:
                     gc.collect()
-    
+
     print(f"Processing completed in {time.time() - start_time:.2f} seconds")
-    
+
     # Sort results to maintain original order
     print("Sorting results...")
     index_to_position = {idx: pos for pos, idx in enumerate(df.index)}
     all_results.sort(key=lambda x: index_to_position[x[0]])
-    
+
     # Extract results
     indices, keep_rows, p_values = zip(*all_results)
-    
+
     # Create result DataFrame efficiently
     print("Creating result DataFrame...")
-    
+
     # Only keep the time columns
     result_df = df[time_cols].copy()
-    
+
     # Add p-values
-    result_df['p_value'] = p_values
-    
+    result_df["p_value"] = p_values
+
     # Filter significant rows
     significant_df = result_df[list(keep_rows)].copy()
-    
+
     # Clean up memory
     del all_results, indices, keep_rows, p_values
     gc.collect()
-    
+
     return significant_df
 
+
+def filter_chunk_of_edges(
+    chunk_indices,
+    df,
+    time_cols,
+    min_nonzero_timepoints=3,
+    alpha=0.05,
+    min_observations=3,
+    check_direction_invariance=True,
+):
+    """
+    Process a chunk of edges efficiently by working directly with DataFrame indices.
+
+    Parameters:
+        chunk_indices: Index slice to process
+        df: Full DataFrame
+        time_cols: List of time column names
+        min_nonzero_timepoints: Minimum number of non-zero time points required
+        alpha: Significance level for t-test
+        min_observations: Minimum number of observations needed for t-test
+        check_direction_invariance: Whether to filter for direction invariance
+
+    Returns:
+        List of tuples: (index, keep_flag, p_value)
+    """
+    results = []
+
+    # Extract the chunk data efficiently using loc
+    chunk_data = df.loc[chunk_indices, time_cols]
+
+    for idx in chunk_indices:
+        row = chunk_data.loc[idx]
+
+        # Filter for minimum non-zero time points
+        nonzero_mask = row != 0
+        nonzero_count = nonzero_mask.sum()
+
+        if nonzero_count < min_nonzero_timepoints:
+            results.append((idx, False, np.nan))
+            continue
+
+        # Get non-zero values for statistical testing
+        nonzero_values = row[nonzero_mask].values
+
+        # Check if we have enough observations for t-test
+        if len(nonzero_values) < min_observations:
+            results.append((idx, False, np.nan))
+            continue
+
+        # Perform one-sample t-test against zero
+        try:
+            t_stat, p_value = stats.ttest_1samp(nonzero_values, 0)
+
+            # Check significance
+            is_significant = p_value < alpha
+
+            if not is_significant:
+                results.append((idx, False, p_value))
+                continue
+
+            # Check direction invariance if requested
+            if check_direction_invariance:
+                # All non-zero values should have the same sign
+                positive_count = (nonzero_values > 0).sum()
+                negative_count = (nonzero_values < 0).sum()
+
+                # Direction is invariant if all values are positive OR all are negative
+                direction_invariant = (positive_count == 0) or (negative_count == 0)
+
+                if not direction_invariant:
+                    results.append((idx, False, p_value))
+                    continue
+
+            # Edge passes all filters
+            results.append((idx, True, p_value))
+
+        except Exception as e:
+            # Handle any statistical test errors
+            results.append((idx, False, np.nan))
+
+    return results
+
+
 def calculate_force_curves_chunk(
-    beta_chunk: pd.DataFrame, 
-    tf_expression: pd.DataFrame,
-    epsilon: float = 1e-10
+    beta_chunk: pd.DataFrame, tf_expression: pd.DataFrame, epsilon: float = 1e-10
 ) -> pd.DataFrame:
     """
     Calculate force curves for a chunk of beta values using log transformation
-    
+
     Parameters:
         beta_chunk: DataFrame chunk with multi-index (TF, Target) and time columns
         tf_expression: DataFrame with TF expression values (TF as index, time as columns)
         epsilon: Small value to avoid log(0)
-    
+
     Returns:
         DataFrame with force curves for the chunk
     """
     # Get unique TFs in this chunk
     tfs_in_chunk = beta_chunk.index.get_level_values(0).unique()
-    
+
     # Count number of targets per TF in this chunk
     targets_per_tf = beta_chunk.index.get_level_values(0).value_counts()
-    
+
     # Get TF expression data for TFs in this chunk, in the same order as targets_per_tf
     tf_expr_subset = tf_expression.loc[targets_per_tf.index]
-    
+
     # Create expanded TF expression DataFrame to match beta_chunk structure
     expanded_tf_expr = pd.DataFrame(
-        np.repeat(
-            tf_expr_subset.values, targets_per_tf.values, axis=0
-        ),
+        np.repeat(tf_expr_subset.values, targets_per_tf.values, axis=0),
         index=beta_chunk.index,
-        columns=beta_chunk.columns
+        columns=beta_chunk.columns,
     )
-    
+
     # Convert to numpy arrays for calculations
     beta_array = beta_chunk.to_numpy()
     tf_array = expanded_tf_expr.to_numpy()
-    
+
     # Log transformations
     log_beta = np.log10(np.abs(beta_array) + epsilon)
     log_tf = np.log10(tf_array + epsilon)
-    
+
     # Preserve signs from original beta values
     signs = np.sign(beta_array)
-    
+
     # Calculate forces: force = sign(beta) * exp(log10(|beta|) + log10(tf_expr))
     force_array = signs * np.exp(log_beta + log_tf)
-    
+
     # Convert back to DataFrame
     force_chunk = pd.DataFrame(
-        force_array, 
-        index=beta_chunk.index, 
-        columns=beta_chunk.columns
+        force_array, index=beta_chunk.index, columns=beta_chunk.columns
     )
-    
+
     return force_chunk
+
 
 def create_balanced_chunks(df: pd.DataFrame, n_chunks: int):
     """
@@ -710,22 +752,23 @@ def create_balanced_chunks(df: pd.DataFrame, n_chunks: int):
     """
     chunk_size = len(df) // n_chunks
     remainder = len(df) % n_chunks
-    
+
     chunks = []
     start_idx = 0
-    
+
     for i in range(n_chunks):
         # Add one extra row to first 'remainder' chunks
         current_chunk_size = chunk_size + (1 if i < remainder else 0)
         end_idx = start_idx + current_chunk_size
-        
+
         chunk = df.iloc[start_idx:end_idx]
         if len(chunk) > 0:  # Only add non-empty chunks
             chunks.append(chunk)
-        
+
         start_idx = end_idx
-    
+
     return chunks
+
 
 def calculate_force_curves_parallel(
     beta_curves: pd.DataFrame,
@@ -734,11 +777,11 @@ def calculate_force_curves_parallel(
     chunk_size: int = 50000,
     epsilon: float = 1e-10,
     save_intermediate: bool = False,
-    intermediate_path: str = None
+    intermediate_path: str = None,
 ) -> pd.DataFrame:
     """
     Calculate force curves in parallel for large datasets
-    
+
     Parameters:
         beta_curves: DataFrame with multi-index (TF, Target) and time columns
         tf_expression: DataFrame with TF expression (TF as index, time as columns)
@@ -747,54 +790,51 @@ def calculate_force_curves_parallel(
         epsilon: Small value to avoid log(0)
         save_intermediate: Whether to save intermediate results
         intermediate_path: Path for intermediate files
-    
+
     Returns:
         DataFrame with force curves
     """
-    
+
     if n_processes is None:
         n_processes = min(mp.cpu_count(), 16)  # Cap at 16 to avoid memory issues
-    
+
     print(f"Processing {len(beta_curves):,} edges using {n_processes} processes...")
     print(f"Chunk size: {chunk_size:,} rows")
-    
+
     start_time = time.time()
-    
+
     # Remove p_value column if it exists (keep only time columns)
-    time_cols = [col for col in beta_curves.columns if col.startswith('time_')]
+    time_cols = [col for col in beta_curves.columns if col.startswith("time_")]
     beta_time_only = beta_curves[time_cols].copy()
-    
+
     # Ensure tf_expression has matching time columns
     tf_expr_subset = tf_expression[time_cols].copy()
-    
+
     print(f"Time columns: {time_cols}")
     print(f"Beta curves shape: {beta_time_only.shape}")
     print(f"TF expression shape: {tf_expr_subset.shape}")
-    
+
     # Create chunks
     n_chunks = max(1, len(beta_time_only) // chunk_size)
     chunks = create_balanced_chunks(beta_time_only, n_chunks)
-    
+
     print(f"Created {len(chunks)} chunks")
     print(f"Chunk sizes: {[len(chunk) for chunk in chunks[:5]]}...")  # Show first 5
-    
+
     # Create partial function for processing
     process_func = partial(
-        calculate_force_curves_chunk,
-        tf_expression=tf_expr_subset,
-        epsilon=epsilon
+        calculate_force_curves_chunk, tf_expression=tf_expr_subset, epsilon=epsilon
     )
-    
+
     # Process chunks in parallel
     force_chunks = []
-    
+
     with ProcessPoolExecutor(max_workers=n_processes) as executor:
         # Submit all chunks
         future_to_chunk = {
-            executor.submit(process_func, chunk): i 
-            for i, chunk in enumerate(chunks)
+            executor.submit(process_func, chunk): i for i, chunk in enumerate(chunks)
         }
-        
+
         # Process results with progress bar
         with tqdm(total=len(chunks), desc="Processing chunks") as pbar:
             for future in as_completed(future_to_chunk):
@@ -802,39 +842,109 @@ def calculate_force_curves_parallel(
                 try:
                     force_chunk = future.result()
                     force_chunks.append(force_chunk)
-                    
+
                     # Optional: save intermediate results
                     if save_intermediate and intermediate_path:
                         force_chunk.to_parquet(
                             f"{intermediate_path}_force_chunk_{chunk_idx}.parquet"
                         )
-                    
+
                 except Exception as exc:
-                    print(f'Chunk {chunk_idx} generated an exception: {exc}')
+                    print(f"Chunk {chunk_idx} generated an exception: {exc}")
                     raise exc
-                
+
                 pbar.update(1)
-                
+
                 # Periodic garbage collection
                 if len(force_chunks) % 10 == 0:
                     gc.collect()
-    
+
     print(f"Processing completed in {time.time() - start_time:.2f} seconds")
-    
+
     # Combine all chunks
     print("Combining results...")
     force_curves_result = pd.concat(force_chunks, axis=0)
-    
+
     # Ensure the result maintains the original order
     force_curves_result = force_curves_result.loc[beta_time_only.index]
-    
+
     print(f"Final shape: {force_curves_result.shape}")
-    
+
     # Clean up memory
     del force_chunks, chunks
     gc.collect()
-    
+
     return force_curves_result
+
+def calculate_tf_episodic_enrichment(df, total_lf_genes, total_genes_in_grn):
+    """
+    Calculate TF enrichment scores using hypergeometric test
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame with MultiIndex (TF, Target) and columns 'avg_force', 'is_in_lf'
+    total_lf_genes : int
+        Total number of active LF genes in the episode
+    total_genes_in_grn : int
+        Total number of genes in the episodic GRN
+    
+    Returns:
+    --------
+    pandas.DataFrame
+        DataFrame with columns: TF, p_value, enrichment_score, genes_in_lf, genes_dwnstrm, weights
+    """
+    
+    results = []
+    
+    # Group by TF (level 0 of the MultiIndex)
+    for tf in df.index.get_level_values(0).unique():
+        tf_data = df.loc[tf]
+        
+        # Calculate metrics for this TF
+        tf_lf_targets = tf_data['is_in_lf'].sum()  # Number of LF targets for this TF (k)
+        tf_total_targets = len(tf_data)  # Total targets for this TF (n)
+        
+        # Get LF gene names and their weights for this TF
+        lf_mask = tf_data['is_in_lf']
+        genes_in_lf = tuple(str(gene) for gene in tf_data[lf_mask].index.tolist())
+        weights = tuple(tf_data[lf_mask]['avg_force'].tolist())
+        
+        # Get downstream genes that are NOT in LF (False for is_in_lf)
+        non_lf_mask = ~tf_data['is_in_lf']
+        genes_dwnstrm = tuple(str(gene) for gene in tf_data[non_lf_mask].index.tolist())
+        
+        # Hypergeometric test parameters:
+        # N = total_genes_in_grn (population size)
+        # K = total_lf_genes (number of success states in population)
+        # n = tf_total_targets (sample size)
+        # k = tf_lf_targets (number of observed successes)
+        
+        # Calculate p-value using hypergeometric distribution
+        # P(X >= k) = 1 - P(X <= k-1)
+        if tf_total_targets > 0 and total_lf_genes > 0:
+            p_value = hypergeom.sf(tf_lf_targets - 1, 
+                                 total_genes_in_grn, 
+                                 total_lf_genes, 
+                                 tf_total_targets)
+            
+            # Calculate enrichment score (fold enrichment)
+            expected = (tf_total_targets * total_lf_genes) / total_genes_in_grn
+            enrichment_score = tf_lf_targets / expected if expected > 0 else 0
+        else:
+            p_value = 1.0
+            enrichment_score = 0
+        
+        results.append({
+            'TF': str(tf),
+            'p_value': p_value,
+            'enrichment_score': enrichment_score,
+            'genes_in_lf': genes_in_lf,
+            'genes_dwnstrm': genes_dwnstrm,
+            'weights': weights
+        })
+    
+    return pd.DataFrame(results)
 
 ##################################### Plotting ############################################
 
@@ -918,6 +1028,7 @@ def fig_regulation_heatmap(
     ax.set_yticks(np.arange(dnet.shape[0] + 1) - 0.5, minor=True)
     ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
     return fig, ax, dnet
+
 
 def cluster_heatmap(
     d,
@@ -1174,6 +1285,7 @@ def cluster_heatmap(
         fig.colorbar(im, cax=cax)
     return fig, d3.columns, d3.index
 
+
 def fig_expression_gradient_heatmap(
     network: dictys.net.dynamic_network,
     start: int,
@@ -1245,6 +1357,7 @@ def fig_expression_gradient_heatmap(
     ax.set_yticks(np.arange(len(target_genes) + 1) - 0.5, minor=True)
     ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
     return fig, ax, cmap
+
 
 def fig_expression_linear_heatmap(
     network: dictys.net.dynamic_network,
@@ -1322,6 +1435,7 @@ def fig_expression_linear_heatmap(
     ax.set_yticks(np.arange(len(target_genes) + 1) - 0.5, minor=True)
     ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
     return fig, ax, cmap
+
 
 def plot_force_heatmap(
     force_df: pd.DataFrame,
@@ -1425,47 +1539,60 @@ def plot_force_heatmap(
     plt.tight_layout()
     return fig, ax, dnet
 
-def plot_expression_for_multiple_genes(targets_in_lf, lcpm_dcurve, dtime, ncols=3, figsize=(18, 15)):
+
+def plot_expression_for_multiple_genes(
+    targets_in_lf, lcpm_dcurve, dtime, ncols=3, figsize=(18, 15)
+):
     """
     Plots expression curves for multiple target genes in a single figure.
     """
     # Calculate number of rows needed
     n_targets = len(targets_in_lf)
     nrows = math.ceil(n_targets / ncols)
-    
+
     # Create figure and subplots
     fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
     axes = axes.flatten() if n_targets > 1 else [axes]  # Handle case of single subplot
-    
+
     # Loop through each target gene
     for i, gene in enumerate(targets_in_lf):
         ax = axes[i]
-        
+
         # Check if gene exists in lcpm_dcurve
         if gene in lcpm_dcurve.index:
             # Plot expression curve
-            line = ax.plot(dtime, lcpm_dcurve.loc[gene], linewidth=2, color='green')
-            
+            line = ax.plot(dtime, lcpm_dcurve.loc[gene], linewidth=2, color="green")
+
             # Add label at the end of the line
-            ax.text(dtime.iloc[-1], lcpm_dcurve.loc[gene].iloc[-1], f' {gene}', 
-                   color='green', verticalalignment='center')
-            
+            ax.text(
+                dtime.iloc[-1],
+                lcpm_dcurve.loc[gene].iloc[-1],
+                f" {gene}",
+                color="green",
+                verticalalignment="center",
+            )
+
             # Set title and labels
             ax.set_title(gene)
-            ax.set_xlabel('Pseudotime')
-            ax.set_ylabel('Log CPM')
-            
+            ax.set_xlabel("Pseudotime")
+            ax.set_ylabel("Log CPM")
+
             # Remove top and right spines
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
         else:
-            ax.text(0.5, 0.5, f"{gene} not found", 
-                   horizontalalignment='center', verticalalignment='center')
-            ax.axis('off')
+            ax.text(
+                0.5,
+                0.5,
+                f"{gene} not found",
+                horizontalalignment="center",
+                verticalalignment="center",
+            )
+            ax.axis("off")
     # Hide any unused subplots
-    for j in range(i+1, len(axes)):
-        axes[j].axis('off')
+    for j in range(i + 1, len(axes)):
+        axes[j].axis("off")
     # Adjust layout
     plt.tight_layout()
-    plt.suptitle('Expression Curves for Target Genes', fontsize=16, y=1.02)
+    plt.suptitle("Expression Curves for Target Genes", fontsize=16, y=1.02)
     return fig
