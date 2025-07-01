@@ -307,6 +307,12 @@ def compute_expression_regulation_curves(
         stat1_net = fsmooth(stat.net(dictys_dynamic_object))
         stat1_netbin = stat.fbinarize(stat1_net, sparsity=sparsity)
         stat1_y = stat.flnneighbor(stat1_netbin)
+    elif mode == "weighted_regulation":
+        # Log weighted outdegree
+        stat1_net = fsmooth(stat.net(dictys_dynamic_object))
+        stat1_y = stat.flnneighbor(stat1_net, weighted_sparsity=sparsity)
+    elif mode == "TF_expression":
+        stat1_y = fsmooth(stat.lcpm_tf(dictys_dynamic_object, cut=0))
     elif mode == "expression":
         stat1_y = fsmooth(stat.lcpm(dictys_dynamic_object, cut=0))
     else:

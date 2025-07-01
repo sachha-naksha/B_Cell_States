@@ -8,3 +8,4 @@ pseudotime_methods/
 *.out
 multiome_dynamic_regulation/py_scripts/dynamic_grn/debug_subset_cell.py
 multiome_dynamic_regulation/bash_scripts/preproc/1b_traj_windows_parallel.sbatch
+multiome_dynamic_regulation/py_scripts/analysis/predisposition_analysis.ipynb
