@@ -166,6 +166,33 @@ class episode_dynamics:
         episodic_grn_edges = self.avg_force_df[top_percent_mask].copy()
         self.episodic_grn_edges = episodic_grn_edges
         return episodic_grn_edges
+    
+    def select_top_activating_and_repressing_edges(self, percentile_positive=98.5, percentile_negative=0.5):
+        """
+        Select the top k% of edges by average force to build the episodic GRN.
+        Selects top k% positive and top k% negative edges separately.
+        Returns the selected edges as a DataFrame.
+        """
+        avg_force = self.avg_force_df['avg_force']
+        # Separate positive and negative selection
+        positive_forces = avg_force[avg_force > 0]
+        negative_forces = avg_force[avg_force < 0]
+        # Top k% positive
+        if len(positive_forces) > 0:
+            pos_threshold = np.percentile(positive_forces, percentile_positive)
+            top_pos_edges = positive_forces[positive_forces >= pos_threshold]
+        else:
+            top_pos_edges = pd.Series(dtype=avg_force.dtype)
+        # Top k% negative (most negative)
+        if len(negative_forces) > 0:
+            neg_threshold = np.percentile(negative_forces, percentile_negative)
+            top_neg_edges = negative_forces[negative_forces <= neg_threshold]
+        else:
+            top_neg_edges = pd.Series(dtype=avg_force.dtype)
+        episodic_grn_edges = pd.concat([top_pos_edges, top_neg_edges]).to_frame(name='avg_force')
+        episodic_grn_edges = episodic_grn_edges.sort_values(by='avg_force', ascending=False)
+        self.episodic_grn_edges = episodic_grn_edges
+        return episodic_grn_edges
 
     def set_lf_genes(self, lf_genes):
         """
@@ -202,3 +229,40 @@ class episode_dynamics:
         episodic_enrichment_df_sorted = episodic_enrichment_df_sorted[episodic_enrichment_df_sorted['enrichment_score'] != 0]
         self.episodic_enrichment_df = episodic_enrichment_df_sorted
         return episodic_enrichment_df_sorted
+
+def run_episode(
+    episode_idx,
+    dictys_dynamic_object_path,
+    output_folder,
+    latent_factor_folder,
+    time_slice_start,
+    time_slice_end,
+    lf_gene_file,
+    percentile_positive=98.5,
+    percentile_negative=0.5
+):
+    # Load dictys object inside the process
+    dictys_dynamic_object = dictys.net.dynamic_network.from_file(dictys_dynamic_object_path)
+    epi = episode_dynamics(
+        dictys_dynamic_object=dictys_dynamic_object,
+        output_folder=output_folder,
+        latent_factor_folder=latent_factor_folder,
+        trajectory_range=(1, 3),  # Adjust as needed
+        num_points=40,
+        dist=0.001,
+        sparsity=0.01
+    )
+    epi.compute_expression_curves()
+    lf_genes = pd.read_csv(lf_gene_file, sep='\t')['names'].tolist()
+    epi.set_lf_genes(lf_genes)
+    epi.build_episode_grn(time_slice=slice(time_slice_start, time_slice_end))
+    epi.filter_edges()
+    epi.compute_tf_expression()
+    epi.calculate_forces()
+    epi.select_top_activating_and_repressing_edges(percentile_positive, percentile_negative)
+    epi.annotate_lf_in_grn()
+    enrichment_df = epi.calculate_enrichment()
+    # Save to CSV
+    out_path = os.path.join(output_folder, f'enrichment_episode_{episode_idx}.csv')
+    enrichment_df.to_csv(out_path, index=False)
+    return out_path
