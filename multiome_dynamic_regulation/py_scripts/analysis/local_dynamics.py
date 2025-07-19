@@ -157,7 +157,7 @@ class episode_dynamics:
         self.avg_force_df = avg_force_df
         return avg_force_df
 
-    def select_top_edges(self, percentile=99):
+    def select_top_edges(self, percentile=98):
         """
         Select the top k% of edges by absolute average force to build the episodic GRN.
         """
@@ -237,9 +237,13 @@ def run_episode(
     latent_factor_folder,
     time_slice_start,
     time_slice_end,
-    lf_gene_file,
-    percentile_positive=98.5,
-    percentile_negative=0.5
+    lf_genes,
+    percentile=98,
+    traj_start=1,
+    traj_end=2,
+    num_points=40,
+    dist=0.001,
+    sparsity=0.01
 ):
     # Load dictys object inside the process
     dictys_dynamic_object = dictys.net.dynamic_network.from_file(dictys_dynamic_object_path)
@@ -247,19 +251,18 @@ def run_episode(
         dictys_dynamic_object=dictys_dynamic_object,
         output_folder=output_folder,
         latent_factor_folder=latent_factor_folder,
-        trajectory_range=(1, 3),  # Adjust as needed
-        num_points=40,
-        dist=0.001,
-        sparsity=0.01
+        trajectory_range=(traj_start, traj_end),
+        num_points=num_points,
+        dist=dist,
+        sparsity=sparsity
     )
     epi.compute_expression_curves()
-    lf_genes = pd.read_csv(lf_gene_file, sep='\t')['names'].tolist()
     epi.set_lf_genes(lf_genes)
     epi.build_episode_grn(time_slice=slice(time_slice_start, time_slice_end))
     epi.filter_edges()
     epi.compute_tf_expression()
     epi.calculate_forces()
-    epi.select_top_activating_and_repressing_edges(percentile_positive, percentile_negative)
+    epi.select_top_edges(percentile)
     epi.annotate_lf_in_grn()
     enrichment_df = epi.calculate_enrichment()
     # Save to CSV
