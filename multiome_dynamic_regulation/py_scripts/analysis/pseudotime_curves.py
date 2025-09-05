@@ -1,8 +1,3 @@
-####
-# 1. Gets data over pseudotime on all scales (window, gaussian smoothed points, episode).
-# 2. Classifies TFs based on their global activity.
-####
-
 import gc
 import math
 import multiprocessing as mp
@@ -30,63 +25,62 @@ from utils_custom import *
 
 class SmoothedCurves:
     """
-    A class for generating smoothed curves over pseudotime.
-    
-    This class provides methods to compute expression and regulation curves,
-    calculate regulatory forces.
+    provides methods to compute expression and regulation curves,
+    and calculate regulatory forces.
     """
     
-    def __init__(self, dictys_dynamic_object=None):
+    def __init__(self, dictys_dynamic_object=None,
+        trajectory_range=(1, 3),
+        num_points=40,
+        dist=0.001,
+        sparsity=0.01,
+        mode="regulation",
+        ):
         """
-        Initialize the analyzer with an optional dictys dynamic object.
-        
-        Args:
-            dictys_dynamic_object: The dictys dynamic object containing network data
+        initialize the analyzer
         """
         self.dictys_dynamic_object = dictys_dynamic_object
+        self.trajectory_range = trajectory_range
+        self.num_points = num_points
+        self.dist = dist
+        self.sparsity = sparsity
+        self.mode = mode
     
     def get_smoothed_curves(
-        self,
-        start: int,
-        stop: int,
-        num: int = 100,
-        dist: float = 1.5,
-        mode: str = "regulation",
-        sparsity: float = 0.01,
-        dictys_dynamic_object=None
+        self
     ) -> Tuple[pd.DataFrame, pd.Series]:
         """
-        Compute expression (lcpm) and regulation (ltarget_count) curves over pseudotime for one branch.
+        compute expression (lcpm) and regulation (ltarget_count) curves over pseudotime for one branch.
         
-        Args:
+        args:
             start: Start node on the trajectory
             stop: Stop node on the trajectory
             num: Number of equispaced points to sample (default: 100)
             dist: Pseudotime distance to apply gaussian smoothing over (default: 1.5)
-            mode: Data to retrieve - "regulation", "weighted_regulation", "TF_expression", or "expression"
+            mode: Data to retrieve - "regulation", "weighted_regulation", "tf_expression", or "expression"
             sparsity: Sparsity threshold for the network (default: 0.01)
             dictys_dynamic_object: Override the class instance object
             
-        Returns:
-            Tuple of (curves_dataframe, pseudotime_series)
+        returns:
+            tuple of (curves_dataframe, pseudotime_series)
         """
         obj = dictys_dynamic_object or self.dictys_dynamic_object
         if obj is None:
             raise ValueError("No dictys_dynamic_object provided")
 
         # sample equispaced points and instantiate smoothing function    
-        pts, fsmooth = obj.linspace(start, stop, num, dist)
+        pts, fsmooth = obj.linspace(self.trajectory_range[0], self.trajectory_range[1], self.num_points, self.dist)
         
         if mode == "regulation":
             # Log number of targets
             stat1_net = fsmooth(stat.net(obj))
-            stat1_netbin = stat.fbinarize(stat1_net, sparsity=sparsity)
+            stat1_netbin = stat.fbinarize(stat1_net, sparsity=self.sparsity)
             stat1_y = stat.flnneighbor(stat1_netbin)
         elif mode == "weighted_regulation":
             # Log weighted outdegree
             stat1_net = fsmooth(stat.net(obj))
-            stat1_y = stat.flnneighbor(stat1_net, weighted_sparsity=sparsity)
-        elif mode == "TF_expression":
+            stat1_y = stat.flnneighbor(stat1_net, weighted_sparsity=self.sparsity)
+        elif mode == "tf_expression":
             stat1_y = fsmooth(stat.lcpm_tf(obj, cut=0))
         elif mode == "expression":
             stat1_y = fsmooth(stat.lcpm(obj, cut=0))
@@ -105,14 +99,14 @@ class SmoothedCurves:
     @staticmethod
     def calculate_auc(dx: NDArray[float], dy: NDArray[float]) -> NDArray[float]:
         """
-        Computes area under the curves using trapezoidal rule.
+        computes area under the curves using trapezoidal rule.
         
-        Args:
+        args:
             dx: X-axis values (must be increasing)
             dy: Y-axis values (2D array where each row is a curve)
             
-        Returns:
-            Array of AUC values for each curve
+        returns:
+            array of AUC values for each curve
         """
         if len(dx) < 2 or not (dx[1:] > dx[:-1]).all():
             raise ValueError("dx must be increasing and have at least 2 values.")
@@ -127,16 +121,13 @@ class SmoothedCurves:
         dy: NDArray[float]
     ) -> NDArray[float]:
         """
-        Computes transient log fold change for curves.
+        computes transient log fold change for curves.
         
-        This measures the transient behavior by normalizing pseudotime and
-        subtracting baseline (median of curve, start, and end values).
-        
-        Args:
+        args:
             dx: Pseudotime values
             dy: Expression/regulation values
             
-        Returns:
+        returns:
             Transient logFC values for each curve
         """
         n = dy.shape[1]
@@ -153,17 +144,15 @@ class SmoothedCurves:
         dy: NDArray[float]
     ) -> NDArray[float]:
         """
-        Computes switching time for curves.
-        
-        This measures when the main transition occurs by calculating the
+        measures when the main transition occurs by calculating the
         normalized area under the curve relative to the total change.
         
-        Args:
+        args:
             dx: Pseudotime values
             dy: Expression/regulation values
             
-        Returns:
-            Switching time values for each curve
+        returns:
+            switching time values for each curve
         """
         n = dy.shape[1]
         dx = (dx - dx[0]) / (dx[-1] - dx[0])
@@ -179,42 +168,75 @@ class SmoothedCurves:
         dy: NDArray[float]
     ) -> NDArray[float]:
         """
-        Computes terminal log fold change for curves.
+        computes difference between final and initial values.
         
-        This is simply the difference between final and initial values.
-        
-        Args:
+        args:
             dx: Pseudotime values (must be increasing)
             dy: Expression/regulation values
             
-        Returns:
-            Terminal logFC values for each curve
+        returns:
+            terminal logFC values for each curve
         """
         if len(dx) < 2 or not (dx[1:] > dx[:-1]).all():
             raise ValueError("dx must be increasing and have at least 2 values.")
         return dy[:, -1] - dy[:, 0]
     
+    def curve_characteristics(
+        self,
+        dx: NDArray[float],
+        dy: NDArray[float],
+        include_metrics: list = None
+    ) -> pd.DataFrame:
+        """
+        compute multiple characteristics for the given curves.
+        
+        args:
+            dx: Pseudotime values
+            dy: Expression/regulation values  
+            include_metrics: List of metrics to compute. Options: 
+                           ['transient_logfc', 'switching_time', 'terminal_logfc', 'auc']
+                           if None, computes all metrics.
+                           
+        returns:
+            dataframe with computed characteristics for each curve
+        """
+        if include_metrics is None:
+            include_metrics = ['transient_logfc', 'switching_time', 'terminal_logfc', 'auc']
+        
+        results = {}
+        
+        if 'transient_logfc' in include_metrics:
+            results['transient_logfc'] = self.calculate_transient_logfc(dx, dy)
+        if 'switching_time' in include_metrics:
+            results['switching_time'] = self.calculate_switching_time(dx, dy)
+        if 'terminal_logfc' in include_metrics:
+            results['terminal_logfc'] = self.calculate_terminal_logfc(dx, dy)
+        if 'auc' in include_metrics:
+            results['auc'] = self.calculate_auc(dx, dy)
+        
+        return pd.DataFrame(results)
+
     @staticmethod
     def calculate_force_curves(
         beta_curves: pd.DataFrame, 
         tf_expression: pd.Series
     ) -> pd.DataFrame:
         """
-        Calculate regulatory force curves using log transformation.
+        calculates regulatory force curves using log transformation.
         
-        Force is calculated as beta * TF_expression
+        force is calculated as beta * tf_expression
         
-        Args:
-            beta_curves: DataFrame with regulatory coefficients (multi-indexed by TF and target)
-            tf_expression: Series with TF expression values
+        args:
+            beta_curves: DataFrame with regulatory coefficients (multi-indexed by tf and target)
+            tf_expression: Series with tf expression values
             
-        Returns:
-            DataFrame with calculated force curves
+        returns:
+            dataframe with calculated force curves
         """
-        # Count number of targets per TF from beta_curves multi-index
+        # Count number of targets per tf from beta_curves multi-index
         targets_per_tf = beta_curves.index.get_level_values(0).value_counts()
         
-        # Create a DataFrame with repeated TF expression values for each target
+        # Create a DataFrame with repeated tf expression values for each target
         expanded_tf_expr = pd.DataFrame(
             np.repeat(
                 tf_expression.values, targets_per_tf.values, axis=0
@@ -247,30 +269,53 @@ class SmoothedCurves:
         
         return force_curves
 
+class AlignTimeScales:
+    """
+    window is one time scale, where a set of cells are at the same temporal state (steady state). 
+    sampled dist/points are at the scale of comparing two time states of cells with smoothening/blur in the middle for continuity.
+    episode is at the time scale of an action taking place (tf force is invariant over an episode)
+    this class makes the time scales correspond to each other by mapping them to pseudotime values.
+    """
+    def __init__(self, dictys_dynamic_object=None,
+        trajectory_range=(1, 3),
+        num_points=40,
+        dist=0.001,
+        sparsity=0.01,
+        ):
+        """
+        initialize the aligner with an optional dictys dynamic object.
+        """
+        self.dictys_dynamic_object = dictys_dynamic_object
+        self.trajectory_range = trajectory_range
+        self.num_points = num_points
+        self.dist = dist
+        self.sparsity = sparsity
+        
+
+    def window_idx_of_sampled_points(self, sampled_points):
+        """
+        window that the sampled point belongs to
+        """
+        return 0
+
+    def pseudotime_of_window_centroid(self, window_idx):
+        """
+        pseudotime of the centroid of the window
+        """
+        return 0
+
+    def construct_episode(self, time_slice):
+        """
+        construct an episode based on the number of sampled equispaced points where tf action can be allowed to take place.
+        """
+        return 0
+    
+
 ##################################### Curve characteristics ############################################
-
-def curve_characteristics(dcurve, dtime):
-    """
-    Compute curve characteristics for one branch.
-    Switching time, Terminal logFC, Transient logFC per TF
-    """
-    charlist = {
-        "Terminal logFC": _dynamic_network_char_terminal_logfc_,
-        "Transient logFC": _dynamic_network_char_transient_logfc_,
-        "Switching time": _dynamic_network_char_switching_time_,
-    }
-    # Compute curve characteristics
-    dchar = {}
-    for xj in charlist:
-        dchar[xj] = charlist[xj](dtime.values, dcurve.values)
-    dchar = pd.DataFrame.from_dict(dchar)
-    dchar.set_index(dcurve.index, inplace=True, drop=True)
-    return dchar
-
 
 def classify_tf_global_activity(df, terminal_col, transient_col):
     """
-    Add TF activity class to dataframe based on z-score normalized logFC comparison
+    add tf activity class to dataframe based on z-score normalized logfc comparison
     """
     # Z-score normalize both columns
     terminal_zscore = stats.zscore(df[terminal_col])
@@ -304,10 +349,10 @@ def classify_tf_global_activity(df, terminal_col, transient_col):
 
 def get_top_k_tfs_by_class(df, k=20):
     """
-    Get top k TFs from each class based on their relevant ranks
+    get top k tfs from each class based on their relevant ranks
     """
 
-    # Determine which rank to use for each TF based on their class
+    # Determine which rank to use for each tf based on their class
     def get_relevant_rank(row):
         # If terminal effect dominates (Activating/Inactivating or similar), use terminal_rank
         # If transient effect dominates, use transient_rank
@@ -321,14 +366,14 @@ def get_top_k_tfs_by_class(df, k=20):
     # Get unique classes
     classes = df["tf_class"].unique()
 
-    # Dictionary to store top k TFs for each class
+    # Dictionary to store top k tfs for each class
     top_tfs_dict = {}
 
     for class_name in classes:
         class_df = df[df["tf_class"] == class_name].copy()
         # Sort by relevant rank and take top k
         top_k = class_df.nsmallest(k, "relevant_rank")
-        # Extract TF names (assuming index contains TF names)
+        # Extract tf names (assuming index contains tf names)
         top_tfs_dict[class_name] = top_k.index.tolist()
 
     # Create result dataframe with classes as columns

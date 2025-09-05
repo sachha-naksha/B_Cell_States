@@ -29,32 +29,15 @@ from utils_custom import *
 from pseudotime_curves import *
 
 
-class episode_dynamics:
+class EpisodeDynamics:
     """
-    Workflow for episodic GRN extraction, filtering, force calculation, and enrichment.
+    workflow for episodic grn extraction, filtering, force calculation, and enrichment.
     """
 
-    def __init__(
-        self,
-        dictys_dynamic_object,
-        output_folder,
-        latent_factor_folder,
-        trajectory_range=(1, 3),
-        num_points=40,
-        dist=0.001,
-        sparsity=0.01,
-        n_processes=16,
-    ):
-        """
-        Initialize the episode_dynamics object.
-        Args:
-            dictys_dynamic_object: The loaded dictys dynamic network object.
-            output_folder: Path to save intermediate and output files.
-            trajectory_range: (start, stop) tuple for pseudotime/episode.
-            num_points: Number of pseudotime points.
-            dist: Distance parameter for smoothing.
-            sparsity: Sparsity for binarization.
-        """
+    def __init__(self, dictys_dynamic_object, output_folder, latent_factor_folder,
+                 trajectory_range=(1, 3), num_points=40, dist=0.001, sparsity=0.01, n_processes=16):
+        
+        # Core parameters
         self.dictys_dynamic_object = dictys_dynamic_object
         self.output_folder = output_folder
         self.latent_factor_folder = latent_factor_folder
@@ -63,6 +46,25 @@ class episode_dynamics:
         self.dist = dist
         self.sparsity = sparsity
         self.n_processes = n_processes
+        
+        # Initialize composed objects with same parameters
+        self.curves = SmoothedCurves(
+            dictys_dynamic_object=dictys_dynamic_object,
+            trajectory_range=trajectory_range,
+            num_points=num_points,
+            dist=dist,
+            sparsity=sparsity
+        )
+        
+        self.time_aligner = AlignTimeScales(
+            dictys_dynamic_object=dictys_dynamic_object,
+            trajectory_range=trajectory_range,
+            num_points=num_points,
+            dist=dist,
+            sparsity=sparsity
+        )
+        
+        # State variables
         self.lcpm_dcurve = None
         self.dtime = None
         self.episode_beta_dcurve = None
@@ -78,23 +80,18 @@ class episode_dynamics:
 
     def compute_expression_curves(self, mode="expression"):
         """
-        Compute expression curves for all genes.
+        expression curves for all genes using the curves component.
         """
-        lcpm_dcurve, dtime = smoothed_data_curves_with_pseudotime_values(
-            self.dictys_dynamic_object,
-            start=self.trajectory_range[0],
-            stop=self.trajectory_range[1],
-            num=self.num_points,
-            dist=self.dist,
-            mode=mode,
-        )
+        # Update the mode in the curves object
+        self.curves.mode = mode
+        lcpm_dcurve, dtime = self.curves.get_smoothed_curves()
         self.lcpm_dcurve = lcpm_dcurve
         self.dtime = dtime
         return lcpm_dcurve, dtime
 
     def build_episode_grn(self, time_slice=slice(0, 5)):
         """
-        Build the episodic GRN (weighted and binarized) for the specified episode/time window.
+        build the episodic grn (weighted and binarized) for the specified episode/time window.
         """
         pts, fsmooth = self.dictys_dynamic_object.linspace(
             self.trajectory_range[0],
@@ -108,6 +105,7 @@ class episode_dynamics:
         dnetbin = stat1_netbin.compute(pts)
         dnet_episode = dnet[:, :, time_slice]
         dnetbin_episode = dnetbin[:, :, time_slice]
+
         # Map indices to gene names
         ndict = self.dictys_dynamic_object.ndict
         index_to_gene = {idx: name for name, idx in ndict.items()}
@@ -117,9 +115,8 @@ class episode_dynamics:
             for tf_idx in range(dnetbin_episode.shape[0])
         ]
         tf_names = [index_to_gene[idx] for idx in tf_gene_indices]
-        # Reshape to DataFrame
-        import pandas as pd
 
+        # reshape to dataframe
         index_tuples = [(tf, target) for tf in tf_names for target in target_names]
         multi_index = pd.MultiIndex.from_tuples(index_tuples, names=["TF", "Target"])
         n_tfs, n_targets, n_times = dnet_episode.shape
@@ -130,7 +127,8 @@ class episode_dynamics:
             columns=[f"time_{i}" for i in range(n_times)],
         )
         episode_beta_dcurve = episode_beta_dcurve[episode_beta_dcurve.sum(axis=1) != 0]
-        # Remove TFs with names starting with ZNF and ZBTB
+
+        # remove tfs with names starting with ZNF and ZBTB
         episode_beta_dcurve = episode_beta_dcurve[
             ~episode_beta_dcurve.index.get_level_values(0).str.startswith("ZNF")
             & ~episode_beta_dcurve.index.get_level_values(0).str.startswith("ZBTB")
@@ -149,7 +147,7 @@ class episode_dynamics:
         pval_threshold=0.001,
     ):
         """
-        Filter episodic GRN edges for significance and direction invariance.
+        filter episodic grn edges for significance and direction invariance.
         """
         filtered_edges = filter_edges_by_significance_and_direction(
             self.episode_beta_dcurve,
@@ -169,7 +167,7 @@ class episode_dynamics:
 
     def compute_tf_expression(self):
         """
-        Compute TF expression for the episode (matching time window).
+        compute tf expression for the episode (matching time window).
         """
         tf_names = self.filtered_edges_p001.index.get_level_values(0).unique()
         tf_lcpm_values = self.lcpm_dcurve.loc[tf_names]
@@ -185,7 +183,7 @@ class episode_dynamics:
 
     def calculate_forces(self, n_processes=20, chunk_size=30000, epsilon=1e-10):
         """
-        Calculate force curves for the filtered episodic GRN.
+        calculate force curves for the filtered episodic grn.
         """
         beta_curves_for_force = self.filtered_edges_p001.drop("p_value", axis=1)
         force_curves = calculate_force_curves_parallel(
@@ -204,7 +202,7 @@ class episode_dynamics:
 
     def select_top_edges(self, percentile=98):
         """
-        Select the top k% of edges by absolute average force to build the episodic GRN.
+        select the top k% of edges by absolute average force to build the episodic grn.
         """
         threshold = np.percentile(np.abs(self.avg_force_df["avg_force"]), percentile)
         top_percent_mask = np.abs(self.avg_force_df["avg_force"]) >= threshold
@@ -216,9 +214,9 @@ class episode_dynamics:
         self, percentile_positive=98.5, percentile_negative=0.5
     ):
         """
-        Select the top k% of edges by average force to build the episodic GRN.
-        Selects top k% positive and top k% negative edges separately.
-        Returns the selected edges as a DataFrame.
+        select the top k% of edges by average force to build the episodic grn.
+        selects top k% positive and top k% negative edges separately.
+        returns the selected edges as a dataframe.
         """
         avg_force = self.avg_force_df["avg_force"]
         # Separate positive and negative selection
@@ -247,7 +245,7 @@ class episode_dynamics:
 
     def set_lf_genes(self, lf_genes):
         """
-        Set the list of LF genes for enrichment analysis.
+        set the list of lf genes for enrichment analysis.
         """
         self.lf_genes = lf_genes
         self.lf_in_object = check_if_gene_in_ndict(
@@ -257,7 +255,7 @@ class episode_dynamics:
 
     def annotate_lf_in_grn(self):
         """
-        Annotate which targets in the episodic GRN are LF genes.
+        annotate which targets in the episodic grn are lf genes.
         """
         if self.lf_genes is None:
             raise ValueError("LF genes not set. Use set_lf_genes() first.")
@@ -268,10 +266,8 @@ class episode_dynamics:
 
     def calculate_enrichment(self):
         """
-        Calculate TF enrichment for LF genes in the episodic GRN.
+        calculate tf enrichment for lf genes in the episodic grn.
         """
-        from utils_custom import calculate_tf_episodic_enrichment
-
         lf_in_episodic_grn = self.episodic_grn_edges[
             self.episodic_grn_edges["is_in_lf"]
         ]
@@ -297,41 +293,11 @@ class episode_dynamics:
         self.episodic_enrichment_df = episodic_enrichment_df_sorted
         return episodic_enrichment_df_sorted
 
-
-class episode_composition:
-    """
-    Workflow for episodic GRN cell composition calculation.
-    """
-
-    def __init__(
-        self,
-        dictys_dynamic_object,
-        output_folder,
-        latent_factor_folder,
-        trajectory_range=(1, 3),
-        num_points=40,
-        dist=0.001,
-        sparsity=0.01,
-        time_slice_start=0,
-        time_slice_end=5,
-    ):
-        self.dictys_dynamic_object = dictys_dynamic_object
-        self.output_folder = output_folder
-        self.latent_factor_folder = latent_factor_folder
-        self.trajectory_range = trajectory_range
-        self.num_points = num_points
-        self.dist = dist
-        self.sparsity = sparsity
-        self.time_slice = slice(time_slice_start, time_slice_end)
-
-    def map_sampled_points_to_windows(self):
+    def episodic_composition(self):
         """
-        Map the sampled points to the windows inside them
-        Return the indices of the windows, to get the cellular composition of them later.
+        Calculate the composition of the episode.
         """
-        # dist sampled points to to windows mapping
         return None
-
 
 def calculate_tf_episodic_enrichment(df, total_lf_genes, total_genes_in_grn):
     """
@@ -408,6 +374,7 @@ def calculate_tf_episodic_enrichment(df, total_lf_genes, total_genes_in_grn):
 
 
 #################################### LF + DyGRN ############################################
+
 def get_unique_regs_by_target(max_force_df):
     """
     Create dictionary of unique TF-target pairs for each target
