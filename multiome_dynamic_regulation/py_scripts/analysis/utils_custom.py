@@ -19,7 +19,8 @@ from scipy import stats
 from scipy.stats import hypergeom
 from tqdm import tqdm
 
-######################### Indices retrieval #########################
+##################################### Data retrieval ############################################
+
 
 def get_tf_indices(dictys_dynamic_object, tf_list):
     """
@@ -96,7 +97,24 @@ def check_if_gene_in_ndict(dictys_dynamic_object, gene_name, return_index=False)
     else:
         raise TypeError("gene_name must be a string or a list-like object of strings")
 
+
+def curvature_of_expression(dcurve: pd.DataFrame, dtime: pd.Series):
+    """
+    Calculate the curvature of expression curves.
+    """
+    # First derivative (dx/dt)
+    dx_dt = pd.DataFrame(
+        np.gradient(dcurve, dtime, axis=1), index=dcurve.index, columns=dcurve.columns
+    )
+    # Second derivative (d2x/dt2)
+    d2x_dt2 = pd.DataFrame(
+        np.gradient(dx_dt, dtime, axis=1), index=dcurve.index, columns=dcurve.columns
+    )
+    return d2x_dt2
+
+    
 ##################################### Window labels ############################################
+
 
 def get_state_labels_in_window(dictys_dynamic_object, cell_labels):
     """
@@ -114,6 +132,7 @@ def get_state_labels_in_window(dictys_dynamic_object, cell_labels):
         ]
     return state_labels_in_window
 
+
 def get_state_total_counts(cell_labels):
     """
     Get total number of cells for each state in the dataset
@@ -122,6 +141,7 @@ def get_state_total_counts(cell_labels):
     for label in cell_labels:
         state_counts[label] = state_counts.get(label, 0) + 1
     return state_counts
+
 
 def get_top_k_fraction_labels(dictys_dynamic_object, window_idx, cell_labels, k=2):
     """
@@ -149,6 +169,7 @@ def get_top_k_fraction_labels(dictys_dynamic_object, window_idx, cell_labels, k=
         state_metrics.items(), key=lambda x: (x[1][1], x[1][0]), reverse=True
     )
     return sorted_states[:k]
+
 
 def window_labels_to_count_df(window_labels_dict):
     """
@@ -183,6 +204,7 @@ def window_labels_to_count_df(window_labels_dict):
             count_df.loc[label, window_idx] = count
 
     return count_df
+
 
 ##################################### Plotting ############################################
 
