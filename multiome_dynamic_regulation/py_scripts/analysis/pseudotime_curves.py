@@ -180,41 +180,6 @@ class SmoothedCurves:
         if len(dx) < 2 or not (dx[1:] > dx[:-1]).all():
             raise ValueError("dx must be increasing and have at least 2 values.")
         return dy[:, -1] - dy[:, 0]
-    
-    def curve_characteristics(
-        self,
-        dx: NDArray[float],
-        dy: NDArray[float],
-        include_metrics: list = None
-    ) -> pd.DataFrame:
-        """
-        compute multiple characteristics for the given curves.
-        
-        args:
-            dx: Pseudotime values
-            dy: Expression/regulation values  
-            include_metrics: List of metrics to compute. Options: 
-                           ['transient_logfc', 'switching_time', 'terminal_logfc', 'auc']
-                           if None, computes all metrics.
-                           
-        returns:
-            dataframe with computed characteristics for each curve
-        """
-        if include_metrics is None:
-            include_metrics = ['transient_logfc', 'switching_time', 'terminal_logfc', 'auc']
-        
-        results = {}
-        
-        if 'transient_logfc' in include_metrics:
-            results['transient_logfc'] = self.calculate_transient_logfc(dx, dy)
-        if 'switching_time' in include_metrics:
-            results['switching_time'] = self.calculate_switching_time(dx, dy)
-        if 'terminal_logfc' in include_metrics:
-            results['terminal_logfc'] = self.calculate_terminal_logfc(dx, dy)
-        if 'auc' in include_metrics:
-            results['auc'] = self.calculate_auc(dx, dy)
-        
-        return pd.DataFrame(results)
 
     @staticmethod
     def calculate_force_curves(
@@ -269,6 +234,116 @@ class SmoothedCurves:
         
         return force_curves
 
+    def curve_characteristics(
+        self,
+        dx: NDArray[float],
+        dy: NDArray[float],
+        include_metrics: list = None
+    ) -> pd.DataFrame:
+        """
+        compute multiple characteristics for the given curves.
+        
+        args:
+            dx: Pseudotime values
+            dy: Expression/regulation values  
+            include_metrics: List of metrics to compute. Options: 
+                           ['transient_logfc', 'switching_time', 'terminal_logfc', 'auc']
+                           if None, computes all metrics.
+                           
+        returns:
+            dataframe with computed characteristics for each curve
+        """
+        if include_metrics is None:
+            include_metrics = ['transient_logfc', 'switching_time', 'terminal_logfc', 'auc']
+        
+        results = {}
+        
+        if 'transient_logfc' in include_metrics:
+            results['transient_logfc'] = self.calculate_transient_logfc(dx, dy)
+        if 'switching_time' in include_metrics:
+            results['switching_time'] = self.calculate_switching_time(dx, dy)
+        if 'terminal_logfc' in include_metrics:
+            results['terminal_logfc'] = self.calculate_terminal_logfc(dx, dy)
+        if 'auc' in include_metrics:
+            results['auc'] = self.calculate_auc(dx, dy)
+        
+        return pd.DataFrame(results)
+
+    def classify_tf_global_activity(self, dx, dy, terminal_col, transient_col):
+        """
+        add tf activity class to dataframe based on z-score normalized logfc comparison
+        """
+        df = self.curve_characteristics(dx, dy)
+        # Z-score normalize both columns
+        terminal_zscore = stats.zscore(df[terminal_col])
+        transient_zscore = stats.zscore(df[transient_col])
+
+        # classification function
+        def get_class_name(terminal_z, transient_z):
+            if abs(terminal_z) >= abs(transient_z):
+                # Terminal effect dominates
+                return "Cumulative" if terminal_z > 0 else "Reductive"
+            else:
+                # Transient effect dominates
+                return "Bell wave" if transient_z > 0 else "U-shaped"
+
+        # Add class name column
+        df["tf_class"] = [
+            get_class_name(t_z, tr_z)
+            for t_z, tr_z in zip(terminal_zscore, transient_zscore)
+        ]
+        # Add z score columns
+        df["terminal_z"] = terminal_zscore
+        df["transient_z"] = transient_zscore
+        df["terminal_rank"] = (
+            df["terminal_z"].abs().rank(method="dense", ascending=False).astype(int)
+        )
+        df["transient_rank"] = (
+            df["transient_z"].abs().rank(method="dense", ascending=False).astype(int)
+        )
+        return df
+
+    def get_top_k_tfs_by_class(self, dx, dy, k=20):
+        """
+        get top k tfs from each class based on their relevant ranks
+        """
+        df = self.classify_tf_global_activity(dx, dy, "terminal_logfc", "transient_logfc")
+        # Determine which rank to use for each tf based on their class
+        def get_relevant_rank(row):
+            # If terminal effect dominates (Activating/Inactivating or similar), use terminal_rank
+            # If transient effect dominates, use transient_rank
+            if abs(row["terminal_z"]) >= abs(row["transient_z"]):
+                return row["terminal_rank"]
+            else:
+                return row["transient_rank"]
+
+        df["relevant_rank"] = df.apply(get_relevant_rank, axis=1)
+
+        # Get unique classes
+        classes = df["tf_class"].unique()
+
+        # Dictionary to store top k tfs for each class
+        top_tfs_dict = {}
+
+        for class_name in classes:
+            class_df = df[df["tf_class"] == class_name].copy()
+            # Sort by relevant rank and take top k
+            top_k = class_df.nsmallest(k, "relevant_rank")
+            # Extract tf names (assuming index contains tf names)
+            top_tfs_dict[class_name] = top_k.index.tolist()
+
+        # Create result dataframe with classes as columns
+        # Pad shorter lists with None to make all columns same length
+        max_len = max(len(v) for v in top_tfs_dict.values())
+
+        for class_name in top_tfs_dict:
+            while len(top_tfs_dict[class_name]) < max_len:
+                top_tfs_dict[class_name].append(None)
+
+        result_df = pd.DataFrame(top_tfs_dict)
+
+        return result_df
+
 class AlignTimeScales:
     """
     window is one time scale, where a set of cells are at the same temporal state (steady state). 
@@ -309,81 +384,5 @@ class AlignTimeScales:
         construct an episode based on the number of sampled equispaced points where tf action can be allowed to take place.
         """
         return 0
-    
-
-##################################### Curve characteristics ############################################
-
-def classify_tf_global_activity(df, terminal_col, transient_col):
-    """
-    add tf activity class to dataframe based on z-score normalized logfc comparison
-    """
-    # Z-score normalize both columns
-    terminal_zscore = stats.zscore(df[terminal_col])
-    transient_zscore = stats.zscore(df[transient_col])
-
-    # Classification function
-    def get_class_name(terminal_z, transient_z):
-        if abs(terminal_z) >= abs(transient_z):
-            # Terminal effect dominates
-            return "Cumulative" if terminal_z > 0 else "Reductive"
-        else:
-            # Transient effect dominates
-            return "Bell wave" if transient_z > 0 else "U-shaped"
-
-    # Add class name column
-    df["tf_class"] = [
-        get_class_name(t_z, tr_z)
-        for t_z, tr_z in zip(terminal_zscore, transient_zscore)
-    ]
-    # Add z score columns
-    df["terminal_z"] = terminal_zscore
-    df["transient_z"] = transient_zscore
-    df["terminal_rank"] = (
-        df["terminal_z"].abs().rank(method="dense", ascending=False).astype(int)
-    )
-    df["transient_rank"] = (
-        df["transient_z"].abs().rank(method="dense", ascending=False).astype(int)
-    )
-    return df
 
 
-def get_top_k_tfs_by_class(df, k=20):
-    """
-    get top k tfs from each class based on their relevant ranks
-    """
-
-    # Determine which rank to use for each tf based on their class
-    def get_relevant_rank(row):
-        # If terminal effect dominates (Activating/Inactivating or similar), use terminal_rank
-        # If transient effect dominates, use transient_rank
-        if abs(row["terminal_z"]) >= abs(row["transient_z"]):
-            return row["terminal_rank"]
-        else:
-            return row["transient_rank"]
-
-    df["relevant_rank"] = df.apply(get_relevant_rank, axis=1)
-
-    # Get unique classes
-    classes = df["tf_class"].unique()
-
-    # Dictionary to store top k tfs for each class
-    top_tfs_dict = {}
-
-    for class_name in classes:
-        class_df = df[df["tf_class"] == class_name].copy()
-        # Sort by relevant rank and take top k
-        top_k = class_df.nsmallest(k, "relevant_rank")
-        # Extract tf names (assuming index contains tf names)
-        top_tfs_dict[class_name] = top_k.index.tolist()
-
-    # Create result dataframe with classes as columns
-    # Pad shorter lists with None to make all columns same length
-    max_len = max(len(v) for v in top_tfs_dict.values())
-
-    for class_name in top_tfs_dict:
-        while len(top_tfs_dict[class_name]) < max_len:
-            top_tfs_dict[class_name].append(None)
-
-    result_df = pd.DataFrame(top_tfs_dict)
-
-    return result_df
