@@ -48,7 +48,7 @@ class EpisodeDynamics:
         self.n_processes = n_processes
         
         # Initialize composed objects with same parameters
-        self.curves = SmoothedCurves(
+        self.curves = 0(
             dictys_dynamic_object=dictys_dynamic_object,
             trajectory_range=trajectory_range,
             num_points=num_points,

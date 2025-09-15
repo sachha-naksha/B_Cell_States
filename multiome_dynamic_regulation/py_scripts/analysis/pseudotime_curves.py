@@ -210,22 +210,22 @@ class SmoothedCurves:
             columns=beta_curves.columns,
         )
         
-        # Convert to numpy arrays for calculations
+        # convert to numpy arrays for calculations
         beta_array = beta_curves.to_numpy()
         tf_array = expanded_tf_expr.to_numpy()
         
-        # Add small epsilon to avoid log(0)
+        # add small epsilon to avoid log(0)
         epsilon = 1e-10
         log_beta = np.log10(np.abs(beta_array) + epsilon)
         log_tf = np.log10(tf_array + epsilon)
         
-        # Preserve signs from original beta values
+        # peserve signs from original beta values
         signs = np.sign(beta_array)
         
-        # Calculate forces
+        # calculate forces
         force_array = signs * np.exp(log_beta + log_tf)
         
-        # Convert back to DataFrame with original index/columns
+        # convert back to DataFrame with original index/columns
         force_curves = pd.DataFrame(
             force_array, 
             index=beta_curves.index, 
@@ -281,18 +281,18 @@ class SmoothedCurves:
         # classification function
         def get_class_name(terminal_z, transient_z):
             if abs(terminal_z) >= abs(transient_z):
-                # Terminal effect dominates
+                # terminal effect dominates
                 return "Cumulative" if terminal_z > 0 else "Reductive"
             else:
-                # Transient effect dominates
+                # transient effect dominates
                 return "Bell wave" if transient_z > 0 else "U-shaped"
 
-        # Add class name column
+        # add class name column
         df["tf_class"] = [
             get_class_name(t_z, tr_z)
             for t_z, tr_z in zip(terminal_zscore, transient_zscore)
         ]
-        # Add z score columns
+        # add z score columns
         df["terminal_z"] = terminal_zscore
         df["transient_z"] = transient_zscore
         df["terminal_rank"] = (
@@ -308,10 +308,10 @@ class SmoothedCurves:
         get top k tfs from each class based on their relevant ranks
         """
         df = self.classify_tf_global_activity(dx, dy, "terminal_logfc", "transient_logfc")
-        # Determine which rank to use for each tf based on their class
+        # determine which rank to use for each tf based on their class
         def get_relevant_rank(row):
-            # If terminal effect dominates (Activating/Inactivating or similar), use terminal_rank
-            # If transient effect dominates, use transient_rank
+            # if terminal effect dominates (Activating/Inactivating or similar), use terminal_rank
+            # if transient effect dominates, use transient_rank
             if abs(row["terminal_z"]) >= abs(row["transient_z"]):
                 return row["terminal_rank"]
             else:
@@ -319,21 +319,21 @@ class SmoothedCurves:
 
         df["relevant_rank"] = df.apply(get_relevant_rank, axis=1)
 
-        # Get unique classes
+        # get unique classes
         classes = df["tf_class"].unique()
 
-        # Dictionary to store top k tfs for each class
+        # dictionary to store top k tfs for each class
         top_tfs_dict = {}
 
         for class_name in classes:
             class_df = df[df["tf_class"] == class_name].copy()
-            # Sort by relevant rank and take top k
+            # sort by relevant rank and take top k
             top_k = class_df.nsmallest(k, "relevant_rank")
-            # Extract tf names (assuming index contains tf names)
+            # extract tf names (assuming index contains tf names)
             top_tfs_dict[class_name] = top_k.index.tolist()
 
-        # Create result dataframe with classes as columns
-        # Pad shorter lists with None to make all columns same length
+        # create result dataframe with classes as columns
+        # pad shorter lists with None to make all columns same length
         max_len = max(len(v) for v in top_tfs_dict.values())
 
         for class_name in top_tfs_dict:
@@ -346,16 +346,14 @@ class SmoothedCurves:
 
 class AlignTimeScales:
     """
-    window is one time scale, where a set of cells are at the same temporal state (steady state). 
-    sampled dist/points are at the scale of comparing two time states of cells with smoothening/blur in the middle for continuity.
-    episode is at the time scale of an action taking place (tf force is invariant over an episode)
-    this class makes the time scales correspond to each other by mapping them to pseudotime values.
+    standardize the window, sampled points, episode time-scales to S0 pseudotime values.
     """
     def __init__(self, dictys_dynamic_object=None,
         trajectory_range=(1, 3),
         num_points=40,
         dist=0.001,
         sparsity=0.01,
+        total_episodes=8,
         ):
         """
         initialize the aligner with an optional dictys dynamic object.
@@ -365,24 +363,32 @@ class AlignTimeScales:
         self.num_points = num_points
         self.dist = dist
         self.sparsity = sparsity
-        
+        self.total_episodes = total_episodes
 
-    def window_idx_of_sampled_points(self, sampled_points):
+    def pseudotime_of_windows(self):
         """
-        window that the sampled point belongs to
+        returns - numpy array (of window centroids' pseudotime values)
+        S0 or S1 pseudotime values depending on the trajectory range.
         """
-        return 0
+        # get 2d array of all nodes' pseudotimes per window
+        node_specific_pseudotimes_per_window = self.dictys_dynamic_object.point['s'].dist
+        # if traj range starts from 0 return the 0th pseudotime out of 0,1,2,3 and if it starts from 1 return the 1st pseudotime out of 0,1,2,3
+        idx_for_querying_pseudotimes = self.trajectory_range[0]
+        # return the pseudotime values
+        return node_specific_pseudotimes_per_window[:, idx_for_querying_pseudotimes]
 
-    def pseudotime_of_window_centroid(self, window_idx):
+    def pseudotime_of_sampled_points(self):
         """
-        pseudotime of the centroid of the window
+        returns - numpy array of sampled points' pseudotime values.
+        S0 or S1 pseudotime values depending on the trajectory range.
         """
-        return 0
-
-    def construct_episode(self, time_slice):
-        """
-        construct an episode based on the number of sampled equispaced points where tf action can be allowed to take place.
-        """
-        return 0
+        # sample equi-spaced points and instantiate smoothing function    
+        pts, fsmooth = self.dictys_dynamic_object.linspace(self.trajectory_range[0], self.trajectory_range[1], self.num_points, self.dist)
+        # pseudo time values (x axis)
+        stat1_x = stat.pseudotime(self.dictys_dynamic_object, pts)
+        tmp_x = stat1_x.compute(pts)
+        dx = pd.Series(tmp_x[0])
+        # return numpy array of pseudotime values
+        return dx.to_numpy()
 
 
