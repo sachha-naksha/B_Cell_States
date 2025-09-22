@@ -28,19 +28,74 @@ from tqdm import tqdm
 from utils_custom import *
 from pseudotime_curves import *
 
+class AlignTimeScales:
+    """
+    standardize the window and sampled points time-scales to S0 or S1 pseudotime values depending on the trajectory range being queried.
+    """
+    def __init__(self, dictys_dynamic_object=None,
+        trajectory_range=(1, 3),
+        num_points=40,
+        dist=0.001,
+        sparsity=0.01,
+        total_episodes=8,
+        ):
+        """
+        initialize the aligner with an optional dictys dynamic object.
+        """
+        self.dictys_dynamic_object = dictys_dynamic_object
+        self.trajectory_range = trajectory_range
+        self.num_points = num_points
+        self.dist = dist
+        self.sparsity = sparsity
+        self.total_episodes = total_episodes
+
+    def pseudotime_of_windows(self):
+        """
+        returns - numpy array (of window centroids' pseudotime values)
+        S0 or S1 pseudotime values depending on the trajectory range.
+        """
+        # get 2d array of all nodes' pseudotimes per window
+        node_specific_pseudotimes_per_window = self.dictys_dynamic_object.point['s'].dist
+        # if traj range starts from 0 return the 0th pseudotime out of 0,1,2,3 and if it starts from 1 return the 1st pseudotime out of 0,1,2,3
+        idx_for_querying_pseudotimes = self.trajectory_range[0]
+        # return the pseudotime values
+        return node_specific_pseudotimes_per_window[:, idx_for_querying_pseudotimes]
+
+    def pseudotime_of_sampled_points(self):
+        """
+        returns - numpy array of sampled points' pseudotime values.
+        S0 or S1 pseudotime values depending on the trajectory range.
+        [should be directly corresponding to window centroid time points]
+        """
+        # sample equi-spaced points and instantiate smoothing function    
+        pts, fsmooth = self.dictys_dynamic_object.linspace(self.trajectory_range[0], self.trajectory_range[1], self.num_points, self.dist)
+        # pseudo time values (x axis)
+        stat1_x = stat.pseudotime(self.dictys_dynamic_object, pts)
+        tmp_x = stat1_x.compute(pts)
+        dx = pd.Series(tmp_x[0])
+        # return numpy array of pseudotime values
+        return dx.to_numpy()
+    
+    def pseudotime_of_episode(self):
+        """
+        Pseudotime of an episode is the median pseudotime 
+        of the dist time-points present in the episode.
+        """
+        return None
 
 class EpisodeDynamics:
     """
     workflow for episodic grn extraction, filtering, force calculation, and enrichment.
     """
 
-    def __init__(self, dictys_dynamic_object, output_folder, latent_factor_folder,
+    def __init__(self, dictys_dynamic_object, output_folder, latent_factor_folder, mode="expression",
                  trajectory_range=(1, 3), num_points=40, dist=0.001, sparsity=0.01, n_processes=16):
         
         # Core parameters
         self.dictys_dynamic_object = dictys_dynamic_object
         self.output_folder = output_folder
         self.latent_factor_folder = latent_factor_folder
+        self.mode = mode
         self.trajectory_range = trajectory_range
         self.num_points = num_points
         self.dist = dist
@@ -48,12 +103,13 @@ class EpisodeDynamics:
         self.n_processes = n_processes
         
         # Initialize composed objects with same parameters
-        self.curves = 0(
+        self.curves = SmoothedCurves(
             dictys_dynamic_object=dictys_dynamic_object,
             trajectory_range=trajectory_range,
             num_points=num_points,
             dist=dist,
-            sparsity=sparsity
+            sparsity=sparsity,
+            mode=mode
         )
         
         self.time_aligner = AlignTimeScales(
@@ -245,7 +301,7 @@ class EpisodeDynamics:
 
     def set_lf_genes(self, lf_genes):
         """
-        set the list of lf genes for enrichment analysis.
+        check if the lf genes are in the dictys dynamic object.
         """
         self.lf_genes = lf_genes
         self.lf_in_object = check_if_gene_in_ndict(
@@ -295,9 +351,11 @@ class EpisodeDynamics:
 
     def episodic_composition(self):
         """
-        Calculate the composition of the episode.
+        Cellular composition of the episode is the union of all 
+        window compositions present in the episode.
         """
         return None
+
 
 def calculate_tf_episodic_enrichment(df, total_lf_genes, total_genes_in_grn):
     """

@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name="episodic_enrichment_gc_98"
-#SBATCH --output="episodic_enrichment_gc_98.log"  
+#SBATCH --job-name="ee_blimp1_ko_gc"
+#SBATCH --output="ee_blimp1_ko_gc.log"  
 #SBATCH -p RM-shared           
 #SBATCH -N 1            
 #SBATCH --ntasks-per-node=64 #for memory     
 #SBATCH -t 00:30:00 
-#SBATCH --array=1-8
+#SBATCH --array=4-8
 
 # Set working directory
 WORK_DIR="/ocean/projects/cis240075p/asachan/bio_informatics_analysis/B_Cells_human_analysis/src/multiome_dynamic_regulation/py_scripts/analysis"
@@ -17,7 +17,7 @@ source activate dictys
 
 # I/O file names
 dictys_dynamic_object_path="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output/dynamic.h5"
-output_folder="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output/intermediate_tmp_files/blimp_irf_ko/gc_98"
+output_folder="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output/intermediate_tmp_files/blimp1_ko/gc_98"
 latent_factor_folder="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/other_files/latent_factors"
 lf_blimp1_file="${latent_factor_folder}/feature_list_Z5_PRDM1_KO.txt"
 lf_irf4_file="${latent_factor_folder}/feature_list_Z4_IRF4_KO.txt"

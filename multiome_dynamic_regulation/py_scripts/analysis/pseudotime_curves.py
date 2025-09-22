@@ -29,12 +29,12 @@ class SmoothedCurves:
     and calculate regulatory forces.
     """
     
-    def __init__(self, dictys_dynamic_object=None,
-        trajectory_range=(1, 3),
+    def __init__(self, dictys_dynamic_object,
+        trajectory_range,
         num_points=40,
         dist=0.001,
         sparsity=0.01,
-        mode="regulation",
+        mode="expression",
         ):
         """
         initialize the analyzer
@@ -50,45 +50,32 @@ class SmoothedCurves:
         self
     ) -> Tuple[pd.DataFrame, pd.Series]:
         """
-        compute expression (lcpm) and regulation (ltarget_count) curves over pseudotime for one branch.
-        
-        args:
-            start: Start node on the trajectory
-            stop: Stop node on the trajectory
-            num: Number of equispaced points to sample (default: 100)
-            dist: Pseudotime distance to apply gaussian smoothing over (default: 1.5)
-            mode: Data to retrieve - "regulation", "weighted_regulation", "tf_expression", or "expression"
-            sparsity: Sparsity threshold for the network (default: 0.01)
-            dictys_dynamic_object: Override the class instance object
-            
+        compute expression (lcpm) and regulation (ltarget_count) curves over pseudotime for one branch.            
         returns:
             tuple of (curves_dataframe, pseudotime_series)
         """
-        obj = dictys_dynamic_object or self.dictys_dynamic_object
-        if obj is None:
-            raise ValueError("No dictys_dynamic_object provided")
 
         # sample equispaced points and instantiate smoothing function    
-        pts, fsmooth = obj.linspace(self.trajectory_range[0], self.trajectory_range[1], self.num_points, self.dist)
+        pts, fsmooth = self.dictys_dynamic_object.linspace(self.trajectory_range[0], self.trajectory_range[1], self.num_points, self.dist)
         
-        if mode == "regulation":
+        if self.mode == "regulation":
             # Log number of targets
-            stat1_net = fsmooth(stat.net(obj))
+            stat1_net = fsmooth(stat.net(self.dictys_dynamic_object))
             stat1_netbin = stat.fbinarize(stat1_net, sparsity=self.sparsity)
             stat1_y = stat.flnneighbor(stat1_netbin)
-        elif mode == "weighted_regulation":
+        elif self.mode == "weighted_regulation":
             # Log weighted outdegree
-            stat1_net = fsmooth(stat.net(obj))
+            stat1_net = fsmooth(stat.net(self.dictys_dynamic_object))
             stat1_y = stat.flnneighbor(stat1_net, weighted_sparsity=self.sparsity)
-        elif mode == "tf_expression":
-            stat1_y = fsmooth(stat.lcpm_tf(obj, cut=0))
-        elif mode == "expression":
-            stat1_y = fsmooth(stat.lcpm(obj, cut=0))
+        elif self.mode == "tf_expression":
+            stat1_y = fsmooth(stat.lcpm_tf(self.dictys_dynamic_object, cut=0))
+        elif self.mode == "expression":
+            stat1_y = fsmooth(stat.lcpm(self.dictys_dynamic_object, cut=0))
         else:
-            raise ValueError(f"Unknown mode {mode}.")
+            raise ValueError(f"Unknown mode {self.mode}.")
             
         # Pseudo time values (x axis)
-        stat1_x = stat.pseudotime(obj, pts)
+        stat1_x = stat.pseudotime(self.dictys_dynamic_object, pts)
         tmp_y = stat1_y.compute(pts)
         tmp_x = stat1_x.compute(pts)
         dy = pd.DataFrame(tmp_y, index=stat1_y.names[0])
@@ -343,52 +330,3 @@ class SmoothedCurves:
         result_df = pd.DataFrame(top_tfs_dict)
 
         return result_df
-
-class AlignTimeScales:
-    """
-    standardize the window, sampled points, episode time-scales to S0 pseudotime values.
-    """
-    def __init__(self, dictys_dynamic_object=None,
-        trajectory_range=(1, 3),
-        num_points=40,
-        dist=0.001,
-        sparsity=0.01,
-        total_episodes=8,
-        ):
-        """
-        initialize the aligner with an optional dictys dynamic object.
-        """
-        self.dictys_dynamic_object = dictys_dynamic_object
-        self.trajectory_range = trajectory_range
-        self.num_points = num_points
-        self.dist = dist
-        self.sparsity = sparsity
-        self.total_episodes = total_episodes
-
-    def pseudotime_of_windows(self):
-        """
-        returns - numpy array (of window centroids' pseudotime values)
-        S0 or S1 pseudotime values depending on the trajectory range.
-        """
-        # get 2d array of all nodes' pseudotimes per window
-        node_specific_pseudotimes_per_window = self.dictys_dynamic_object.point['s'].dist
-        # if traj range starts from 0 return the 0th pseudotime out of 0,1,2,3 and if it starts from 1 return the 1st pseudotime out of 0,1,2,3
-        idx_for_querying_pseudotimes = self.trajectory_range[0]
-        # return the pseudotime values
-        return node_specific_pseudotimes_per_window[:, idx_for_querying_pseudotimes]
-
-    def pseudotime_of_sampled_points(self):
-        """
-        returns - numpy array of sampled points' pseudotime values.
-        S0 or S1 pseudotime values depending on the trajectory range.
-        """
-        # sample equi-spaced points and instantiate smoothing function    
-        pts, fsmooth = self.dictys_dynamic_object.linspace(self.trajectory_range[0], self.trajectory_range[1], self.num_points, self.dist)
-        # pseudo time values (x axis)
-        stat1_x = stat.pseudotime(self.dictys_dynamic_object, pts)
-        tmp_x = stat1_x.compute(pts)
-        dx = pd.Series(tmp_x[0])
-        # return numpy array of pseudotime values
-        return dx.to_numpy()
-
-
