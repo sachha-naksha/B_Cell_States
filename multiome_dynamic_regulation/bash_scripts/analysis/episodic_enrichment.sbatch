@@ -5,9 +5,9 @@
 #SBATCH -N 1            
 #SBATCH --ntasks-per-node=64 #for memory     
 #SBATCH -t 00:30:00 
-#SBATCH --array=4-8
+#SBATCH --array=5-8
 
-# Set working directory
+# Set working directory where the python script is located
 WORK_DIR="/ocean/projects/cis240075p/asachan/bio_informatics_analysis/B_Cells_human_analysis/src/multiome_dynamic_regulation/py_scripts/analysis"
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 

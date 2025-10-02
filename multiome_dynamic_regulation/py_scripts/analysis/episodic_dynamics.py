@@ -852,39 +852,33 @@ def calculate_force_curves_parallel(
 
     return force_curves_result
 
-
 def run_episode(
     episode_idx,
     dictys_dynamic_object_path,
     output_folder,
     latent_factor_folder,
+    trajectory_range,
+    num_points,
     time_slice_start,
     time_slice_end,
     lf_genes,
-    percentile=98,
-    traj_start=1,
-    traj_end=2,
-    num_points=40,
-    dist=0.001,
-    sparsity=0.01,
-    n_processes=16,
+    percentile=98
 ):
     # Load dictys object inside the process
-    dictys_dynamic_object = dictys.net.dynamic_network.from_file(
-        dictys_dynamic_object_path
-    )
-    epi = episode_dynamics(
+    dictys_dynamic_object = dictys.net.dynamic_network.from_file(dictys_dynamic_object_path)
+    epi = EpisodeDynamics(
         dictys_dynamic_object=dictys_dynamic_object,
         output_folder=output_folder,
         latent_factor_folder=latent_factor_folder,
-        trajectory_range=(traj_start, traj_end),
+        mode="expression",
+        trajectory_range=trajectory_range,  # branch would give why cells are going down there
         num_points=num_points,
-        dist=dist,
-        sparsity=sparsity,
-        n_processes=n_processes,
+        dist=0.001,
+        sparsity=0.01
     )
     epi.compute_expression_curves()
     epi.set_lf_genes(lf_genes)
+    # time slice is the number of windows in the episode based on the sampled num_points
     epi.build_episode_grn(time_slice=slice(time_slice_start, time_slice_end))
     epi.filter_edges()
     epi.compute_tf_expression()
@@ -892,7 +886,7 @@ def run_episode(
     epi.select_top_edges(percentile)
     epi.annotate_lf_in_grn()
     enrichment_df = epi.calculate_enrichment()
-    # Save to CSV
-    out_path = os.path.join(output_folder, f"enrichment_episode_{episode_idx}.csv")
+    # save to CSV
+    out_path = os.path.join(output_folder, f'enrichment_episode_{episode_idx}.csv')
     enrichment_df.to_csv(out_path, index=False)
     return out_path
