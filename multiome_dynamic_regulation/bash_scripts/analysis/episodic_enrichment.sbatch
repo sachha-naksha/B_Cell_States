@@ -5,7 +5,7 @@
 #SBATCH -N 1            
 #SBATCH --ntasks-per-node=64 #for memory     
 #SBATCH -t 00:30:00 
-#SBATCH --array=5-8
+#SBATCH --array=1-8
 
 # Set working directory where the python script is located
 WORK_DIR="/ocean/projects/cis240075p/asachan/bio_informatics_analysis/B_Cells_human_analysis/src/multiome_dynamic_regulation/py_scripts/analysis"
@@ -24,13 +24,14 @@ lf_irf4_file="${latent_factor_folder}/feature_list_Z4_IRF4_KO.txt"
 
 # Calculate the window number based on the array task ID
 episode_idx=$((SLURM_ARRAY_TASK_ID))
-time_slice_start=$(( (episode_idx - 1) * 5 ))
+time_slice_start=$(( (episode_idx - 1) * 5 )) # 5 windows per episode
 time_slice_end=$(( episode_idx * 5 ))
 traj_start=1
 traj_end=3
-num_points=40
+num_points=40 # 8 episodes (40/5)
 dist=0.001
 sparsity=0.01
+percentile=98
 
 # Run enrichment 
 echo "Running enrichment for episode ${episode_idx}" 
@@ -47,26 +48,27 @@ import joblib
 import pickle
 from scipy.stats import median_abs_deviation, hypergeom
 import math
-from utils_custom import *
-from local_dynamics import *
 
-lf_blimp1 = pd.read_csv(\"${lf_blimp1_file}\", sep='\t')['names'].tolist()
-lf_irf4 = pd.read_csv(\"${lf_irf4_file}\", sep='\t')['names'].tolist()
-lf_genes = list(set(lf_blimp1 + lf_irf4))
+from utils_custom import *
+from episodic_dynamics import *
+from pseudotime_curves import *
+
+lf_blimp1 = pd.read_csv(lf_blimp1_file, sep='\t')['names'].tolist()
+lf_irf4 = pd.read_csv(lf_irf4_file, sep='\t')['names'].tolist()
 
 run_episode(
     episode_idx=${episode_idx},
     dictys_dynamic_object_path=\"${dictys_dynamic_object_path}\",
     output_folder=\"${output_folder}\",
     latent_factor_folder=\"${latent_factor_folder}\",
+    trajectory_range=(${traj_start}, ${traj_end}),
+    num_points=${num_points},
     time_slice_start=${time_slice_start},
     time_slice_end=${time_slice_end},
-    lf_genes=lf_genes,
-    traj_start=${traj_start},
-    traj_end=${traj_end},
-    num_points=${num_points},
+    lf_genes=lf_blimp1,
     dist=${dist},
-    sparsity=${sparsity}
+    sparsity=${sparsity},
+    percentile=${percentile}
 )
 "
 

@@ -862,6 +862,8 @@ def run_episode(
     time_slice_start,
     time_slice_end,
     lf_genes,
+    dist=0.001,
+    sparsity=0.01,
     percentile=98
 ):
     # Load dictys object inside the process
@@ -873,8 +875,8 @@ def run_episode(
         mode="expression",
         trajectory_range=trajectory_range,  # branch would give why cells are going down there
         num_points=num_points,
-        dist=0.001,
-        sparsity=0.01
+        dist=dist,
+        sparsity=sparsity
     )
     epi.compute_expression_curves()
     epi.set_lf_genes(lf_genes)
