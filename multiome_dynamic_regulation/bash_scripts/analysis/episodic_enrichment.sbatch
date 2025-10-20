@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name="ee_blimp1_ko_gc"
-#SBATCH --output="ee_blimp1_ko_gc.log"  
+#SBATCH --job-name="ee_prdm1_ko_gc"
+#SBATCH --output="ee_prdm1_ko_gc.log"  
 #SBATCH -p RM-shared           
 #SBATCH -N 1            
 #SBATCH --ntasks-per-node=64 #for memory     
@@ -17,7 +17,7 @@ source activate dictys
 
 # I/O file names
 dictys_dynamic_object_path="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output/dynamic.h5"
-output_folder="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output/intermediate_tmp_files/blimp1_ko/gc_98"
+output_folder="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output/intermediate_tmp_files/prdm1_ko/gc_98"
 latent_factor_folder="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/other_files/latent_factors"
 lf_blimp1_file="${latent_factor_folder}/feature_list_Z5_PRDM1_KO.txt"
 lf_irf4_file="${latent_factor_folder}/feature_list_Z4_IRF4_KO.txt"
@@ -53,8 +53,8 @@ from utils_custom import *
 from episodic_dynamics import *
 from pseudotime_curves import *
 
-lf_blimp1 = pd.read_csv(lf_blimp1_file, sep='\t')['names'].tolist()
-lf_irf4 = pd.read_csv(lf_irf4_file, sep='\t')['names'].tolist()
+lf_blimp1 = pd.read_csv(\"${lf_blimp1_file}\", sep='\t')['names'].tolist()
+lf_irf4 = pd.read_csv(\"${lf_irf4_file}\", sep='\t')['names'].tolist()
 
 run_episode(
     episode_idx=${episode_idx},
@@ -65,10 +65,10 @@ run_episode(
     num_points=${num_points},
     time_slice_start=${time_slice_start},
     time_slice_end=${time_slice_end},
-    lf_genes=lf_blimp1,
     dist=${dist},
     sparsity=${sparsity},
-    percentile=${percentile}
+    percentile=${percentile},
+    lf_genes=lf_blimp1
 )
 "
 

@@ -63,7 +63,8 @@ class AlignTimeScales:
 
     def pseudotime_of_sampled_points(self):
         """
-        returns - numpy array of sampled points' pseudotime values.
+        returns - numpy array of sampled points' pseudotime values. 
+        these points are not necessarily the window centroids, they are just equi-spaced points along the trajectory.
         S0 or S1 pseudotime values depending on the trajectory range.
         [should be directly corresponding to window centroid time points]
         """
