@@ -5,7 +5,7 @@ import os
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
-from typing import Optional, Tuple, Union
+from typing import Any, Optional, Tuple, Union
 
 import dictys
 import matplotlib
@@ -208,7 +208,78 @@ def window_labels_to_count_df(window_labels_dict):
 
 ##################################### Plotting ############################################
 
+def create_enriched_links_per_state(enriched_links, state_LF):
+    # Create dictionaries to map genes to their states
+    gene_to_state = dict(zip(state_LF['gene'], state_LF['color']))
 
+    # Initialize lists to store links for each state
+    state1_links = []  # For Red (PB)
+    state2_links = []  # For Blue (GC)
+    TFs = set[Any]()
+    targets_in_lf = set[Any]()
+
+    # Iterate over each row in the enriched_links DataFrame
+    for _, row in enriched_links.iterrows():
+        tf_str = row['TF']
+        # Extract the TF name from the string representation of a tuple
+        tf = tf_str.strip("(,)' ").replace("'", "")
+        TFs.add(tf)
+        
+        # Handle the targets as a string representation of a list
+        if isinstance(row['common'], str):
+            # If it's a string representation of a list, convert it to a list
+            targets_str = row['common'].strip("[]").replace("'", "")
+            targets = [t.strip() for t in targets_str.split(",")]
+        else:
+            # If it's already a list
+            targets = row['common']
+    
+        # Assign each TF-target pair to the appropriate state
+        for target in targets:
+            if target and target in gene_to_state:
+                targets_in_lf.add(target)
+                state = gene_to_state[target]
+                link = (tf, target)
+                if state == 'Red':
+                    state1_links.append(link)
+                elif state == 'Blue':
+                    state2_links.append(link)
+    TFs = list(TFs)
+    targets_in_lf = list(targets_in_lf)
+
+    return state1_links, state2_links, TFs, targets_in_lf
+
+def extract_tf_gene_info(enriched_links_df):
+    """
+    Extract TF-Gene links and unique TF/Gene names from enriched links dataframe.
+    """
+    
+    # Validate input
+    if enriched_links_df is None or enriched_links_df.empty:
+        return [], [], []
+    
+    required_cols = ['TF', 'Gene']
+    for col in required_cols:
+        if col not in enriched_links_df.columns:
+            raise ValueError(f"Required column '{col}' not found in dataframe")
+    
+    # Remove any rows with NaN values in TF or Gene columns
+    clean_df = enriched_links_df.dropna(subset=['TF', 'Gene'])
+    
+    if clean_df.empty:
+        return [], [], []
+    
+    # Extract links as list of tuples
+    links_list = list(zip(clean_df['TF'], clean_df['Gene']))
+    
+    # Get unique TF names (sorted for consistency)
+    unique_tfs = sorted(clean_df['TF'].unique().tolist())
+    
+    # Get unique gene names (sorted for consistency)
+    unique_genes = sorted(clean_df['Gene'].unique().tolist())
+    
+    return links_list, unique_tfs, unique_genes
+   
 def fig_regulation_heatmap(
     network: dictys.net.dynamic_network,
     start: int,
@@ -798,6 +869,235 @@ def plot_force_heatmap(
     plt.tight_layout()
     return fig, ax, dnet
 
+def plot_force_heatmap_with_clustering(
+    force_df: pd.DataFrame,
+    dtime: pd.Series,
+    regulations=None,
+    tf_to_targets_dict=None,
+    cmap: Union[str, matplotlib.cm.ScalarMappable] = "coolwarm",
+    vmax: Optional[float] = None,
+    figsize: Tuple[float, float] = (10, 8),
+    plot_figure: bool = True,
+    perform_clustering: bool = True,
+    cluster_method: str = "ward",
+    dtop: float = 0,
+    dright: float = 0.3,
+    row_scaling: dict = None,
+    pathway_labels: dict = None
+) -> Tuple[pd.DataFrame, list, pd.Series, Optional[matplotlib.figure.Figure]]:
+    """
+    Prepares force value data for clustering heatmap and optionally plots it.
+    
+    Parameters:
+    -----------
+    row_scaling: Dict[Tuple[str, str], float]
+        Dictionary mapping (TF, target) tuples to scaling factors.
+        Example: {('IRF4', 'PRDM1'): 0.5} will scale that specific link to 50% of its original values.
+    """
+    # Process input parameters to generate regulation pairs
+    reg_pairs = []
+    reg_labels = []
+    # Case 1: Dictionary of TF -> targets provided
+    if tf_to_targets_dict is not None:
+        for tf, targets in tf_to_targets_dict.items():
+            for target in targets:
+                reg_pairs.append((tf, target))
+                reg_labels.append(f"{tf}->{target}")
+    # Case 2: List of regulation pairs or list of targets for a single TF
+    elif regulations is not None:
+        # Check if first item is a string (target) or tuple/list (regulation pair)
+        if regulations and isinstance(regulations[0], str):
+            # It's a list of targets for a single TF
+            # Extract TF name from the calling context (not ideal but works for the notebook)
+            for key, value in locals().items():
+                if (
+                    isinstance(value, dict)
+                    and "PRDM1" in value
+                    and value["PRDM1"] == regulations
+                ):
+                    tf = "PRDM1"  # Found the TF
+                    break
+            else:
+                # If we can't determine the TF, use the first item in regulations as TF
+                # and the rest as targets (this is a fallback and might not be correct)
+                tf = regulations[0]
+                regulations = regulations[1:]
+
+            for target in regulations:
+                reg_pairs.append((tf, target))
+                reg_labels.append(f"{tf}->{target}")
+        else:
+            # It's a list of regulation pairs
+            reg_pairs = regulations
+            reg_labels = [f"{tf}->{target}" for tf, target in regulations]
+    # If no regulations provided, use non-zero regulations from force_df
+    if not reg_pairs:
+        non_zero_mask = (force_df != 0).any(axis=1)
+        force_df_filtered = force_df[non_zero_mask]
+        reg_pairs = list(force_df_filtered.index)
+        reg_labels = [f"{tf}->{target}" for tf, target in reg_pairs]
+    
+    # Extract force values for the specified regulations
+    force_values = []
+    for pair in reg_pairs:
+        tf, target = pair
+        try:
+            values = force_df.loc[(tf, target)].values
+            
+            # Apply scaling factor if provided for this pair
+            if row_scaling and (tf, target) in row_scaling:
+                scale_factor = row_scaling[(tf, target)]
+                values = values * scale_factor
+                
+            force_values.append(values)
+        except KeyError:
+            raise ValueError(f"Regulation {tf}->{target} not found in force DataFrame")
+    
+    # Convert to numpy array
+    dnet = np.array(force_values)
+    
+    # Convert dnet to DataFrame with proper labels
+    force_df_for_cluster = pd.DataFrame(
+        dnet, 
+        index=reg_labels,
+        columns=[f"{x:.4f}" for x in dtime]
+    )
+    
+    # Plotting logic
+    fig = None
+    if plot_figure:
+        # Calculate max absolute value for symmetric color scaling
+        vmax_val = float(force_df_for_cluster.abs().max().max()) if vmax is None else vmax
+        
+        if perform_clustering:
+            # Use cluster_heatmap for visualization
+            fig, cols, rows = cluster_heatmap(
+                d=force_df_for_cluster,
+                optimal_ordering=True,
+                method=cluster_method,
+                metric="euclidean",
+                cmap=cmap,
+                aspect=0.1,
+                figscale=0.02,
+                dtop=dtop,      # Set to > 0 to enable clustering on columns (pseudotime)
+                dright=dright,  # Set to > 0 to enable clustering on rows (regulations)
+                wcolorbar=0.03,
+                wedge=0.03,
+                ytick=True,
+                vmin=-vmax_val,
+                vmax=vmax_val,
+                figsize=figsize
+            )
+            plt.title("Clustered Force Heatmap")
+        else:
+            # Extract target genes for pathway annotation
+            target_genes = [target for tf, target in reg_pairs]
+            
+            # Process pathway annotations if provided
+            pathway_info = None
+            if pathway_labels:
+                gene_pathways, pathway_color_map, unique_pathways = create_pathway_color_scheme(
+                    pathway_labels, target_genes)
+                
+                pathway_info = {
+                    'gene_pathways': gene_pathways,
+                    'pathway_color_map': pathway_color_map,
+                    'unique_pathways': unique_pathways
+                }
+            
+            # Create figure with subplots for pathway annotation
+            if pathway_info:
+                fig = plt.figure(figsize=figsize)
+                # Adjust layout: thinner main plot + thicker pathway bar + space for legend
+                gs = gridspec.GridSpec(1, 2, width_ratios=[1, 0.1], wspace=0.1)  # Changed from [1, 0.03] to [1, 0.1]
+                ax_main = fig.add_subplot(gs[0])
+                ax_pathway = fig.add_subplot(gs[1])
+            else:
+                fig, ax_main = plt.subplots(figsize=figsize)
+
+            # Plot main heatmap
+            im = ax_main.imshow(dnet, aspect='auto', interpolation='none', cmap=cmap,
+                              vmin=-vmax_val, vmax=vmax_val)
+            
+            # Add horizontal colorbar at the bottom
+            plt.subplots_adjust(bottom=0.15)
+            
+            # Create a new axes for the horizontal colorbar positioned at the bottom
+            if pathway_info:
+                cbar_ax = fig.add_axes([0.15, 0.01, 0.6, 0.01])  # Adjusted for pathway bar
+            else:
+                cbar_ax = fig.add_axes([0.3, 0.01, 0.4, 0.01])
+            
+            cbar = plt.colorbar(im, cax=cbar_ax, orientation='horizontal', label="Force")
+            cbar.ax.tick_params(labelsize=8)
+            cbar.set_label("Force", fontsize=10)
+            
+            # Set regulation pair labels
+            ax_main.set_yticks(list(range(len(reg_labels))))
+            ax_main.set_yticklabels(reg_labels)
+            
+            # Set pseudotime labels
+            num_ticks = 10
+            tick_positions = np.linspace(0, dnet.shape[1] - 1, num_ticks, dtype=int)
+            tick_labels = dtime.iloc[tick_positions]
+            ax_main.set_xticks(tick_positions)
+            ax_main.set_xticklabels([f"{x:.4f}" for x in tick_labels], rotation=45, ha="right")
+            ax_main.set_xlabel("Pseudotime")
+            
+            # Add grid lines
+            ax_main.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
+            
+                        # Plot pathway annotation bar if pathway info is available
+            if pathway_info:
+                # Create pathway colors for each regulation (based on target gene)
+                pathway_colors_ordered = []
+                for tf, target in reg_pairs:
+                    if target in pathway_info['gene_pathways']:
+                        pathway = pathway_info['gene_pathways'][target]
+                        color = pathway_info['pathway_color_map'][pathway]
+                    else:
+                        color = '#CCCCCC'  # Gray for unknown pathways
+                    pathway_colors_ordered.append(color)
+                
+                # Convert hex colors to RGB for imshow
+                import matplotlib.colors as mcolors
+                pathway_colors_rgb = [mcolors.hex2color(color) for color in pathway_colors_ordered]
+                pathway_bar = np.array(pathway_colors_rgb).reshape(-1, 1, 3)
+                
+                # Plot pathway annotation bar with proper alignment
+                ax_pathway.imshow(pathway_bar, aspect='auto', extent=[0, 1, len(reg_labels) - 0.5, -0.5])
+                
+                # Ensure proper alignment with main heatmap
+                ax_pathway.set_ylim(len(reg_labels) - 0.5, -0.5)
+                ax_pathway.set_xlim(0, 1)
+                ax_pathway.set_xticks([])
+                ax_pathway.set_yticks([])
+                
+                # Remove all spines (borders) from the pathway bar
+                for spine in ax_pathway.spines.values():
+                    spine.set_visible(False)
+                
+                # Ensure both axes have the same y-limits and orientation
+                main_ylim = ax_main.get_ylim()
+                ax_pathway.set_ylim(main_ylim)
+                
+                # Add pathway legend on the right side
+                legend_elements = []
+                for pathway in pathway_info['unique_pathways']:
+                    color = pathway_info['pathway_color_map'][pathway]
+                    legend_elements.append(plt.Rectangle((0,0),1,1, facecolor=color, label=pathway))
+                
+                # Position legend on the right side
+                legend = ax_main.legend(handles=legend_elements, loc='center left', 
+                                      bbox_to_anchor=(1.15, 0.5),  # Right side
+                                      fontsize=8, frameon=False, ncol=1)
+                
+                # Adjust legend position to not overlap with horizontal colorbar
+                legend.set_bbox_to_anchor((1.15, 0.6))  # Move up slightly
+            
+        plt.tight_layout()
+    
+    return force_df_for_cluster, reg_labels, dtime, fig
 
 def plot_expression_for_multiple_genes(
     targets_in_lf, lcpm_dcurve, dtime, ncols=3, figsize=(18, 15)
@@ -855,3 +1155,493 @@ def plot_expression_for_multiple_genes(
     plt.tight_layout()
     plt.suptitle("Expression Curves for Target Genes", fontsize=16, y=1.02)
     return fig
+
+def create_pathway_color_scheme(pathway_labels, selected_genes):
+    """
+    Create a sophisticated color scheme for pathways that groups similar pathways
+    and uses gradients for related categories.
+    """
+    
+    # Define pathway groups with related categories
+    pathway_groups = {
+    'Protein Processing': [
+        'Protein folding', 'Protein quality control', 
+        'Protein glycosylation', 'Protein translocation'
+    ],
+    'Protein Secretion': [
+        'Protein secretion/secretory pathway'
+    ],
+    'ER Stress': [  
+        'ER stress', 'UPR'
+    ],
+    'Ubiquitination': [
+        'Ubiquitination'
+    ],
+    'Immune System': [
+        'Immune signaling', 'Antigen presentation', 'B-cell development', 
+        'B-cell differentiation', 'Plasma cell differentiation'
+    ],
+    'Transcriptional Regulation': [
+        'Transcriptional regulation', 'Transcriptional repression', 
+        'Chromatin remodeling', 'Circadian rhythm'  
+    ],
+    'Cell Cycle & Growth': [
+        'Cell cycle regulation', 'Growth factor signaling', 'RTK signaling'
+    ],
+    'Signaling Pathways': [
+        'MAPK signaling', 'PI3K/AKT', 'cAMP signaling', 'TNF signaling', 
+        'Glucocorticoid signaling', 'Glucose metabolism'  
+    ],
+    'Cellular Transport': [
+        'Endocytosis', 'Vesicle-mediated transport', 'Ciliary/centrosome trafficking'
+    ],
+    'Metabolism & Processing': [
+        'Metabolism', 'RNA processing'
+    ],
+    'Cell Structure': [
+        'Cytoskeleton remodeling', 'Cell adhesion', 'Cell migration'
+    ],
+    'Stress Response': [
+        'Apoptosis', 'Vascular remodeling'
+    ],
+    'Development': [
+        'Bone/osteoblast differentiation'
+    ]}    
+    
+    # Define base colors for each group (using distinct, well-separated colors)
+        # Define base colors for each group (using distinct, well-separated colors)
+    group_base_colors = {
+        'Protein Processing': '#E31A1C',      # Red
+        'Protein Secretion': '#FF7F00',      # Orange
+        'ER Stress': '#D62728',              # Dark red
+        'Ubiquitination': '#FF8C00',         # Dark orange
+        'Immune System': '#1F78B4',          # Blue
+        'Transcriptional Regulation': '#33A02C', # Green
+        'Cell Cycle & Growth': '#FFFF33',    # Yellow
+        'Signaling Pathways': '#6A3D9A',     # Purple
+        'Cellular Transport': '#FF69B4',     # Hot pink (more distinct from brown)
+        'Metabolism & Processing': '#A6CEE3', # Light blue
+        'Cell Structure': '#B2DF8A',         # Light green
+        'Stress Response': '#FDBF6F',        # Light orange
+        'Development': '#CAB2D6'             # Light purple
+    }
+    
+    # Create pathway to group mapping
+    pathway_to_group = {}
+    for group, pathways in pathway_groups.items():
+        for pathway in pathways:
+            pathway_to_group[pathway] = group
+    
+    # Extract pathways for selected genes
+    gene_pathways = {}
+    pathway_counts = {}
+    
+    for gene in selected_genes:
+        if gene in pathway_labels:
+            # Take the first pathway category (before comma if multiple)
+            pathway = pathway_labels[gene].split(',')[0].strip()
+            gene_pathways[gene] = pathway
+            
+            # Count occurrences for gradient assignment
+            if pathway not in pathway_counts:
+                pathway_counts[pathway] = 0
+            pathway_counts[pathway] += 1
+        else:
+            gene_pathways[gene] = "Other"
+            if "Other" not in pathway_counts:
+                pathway_counts["Other"] = 0
+            pathway_counts["Other"] += 1
+    
+    # Group pathways and assign colors with gradients
+    import matplotlib.colors as mcolors
+    pathway_color_map = {}
+    
+    for group, base_color in group_base_colors.items():
+        # Find pathways in this group
+        group_pathways = [p for p in pathway_counts.keys() 
+                         if pathway_to_group.get(p, 'Other') == group]
+        
+        if group_pathways:
+            if len(group_pathways) == 1:
+                # Single pathway gets the base color
+                pathway_color_map[group_pathways[0]] = base_color
+            else:
+                # Multiple pathways get gradient colors
+                base_rgb = mcolors.hex2color(base_color)
+                # Create lighter and darker versions
+                gradients = []
+                for i, pathway in enumerate(sorted(group_pathways)):
+                    # Create gradient from darker to lighter
+                    factor = 0.4 + (i / max(1, len(group_pathways) - 1)) * 0.6
+                    rgb = tuple(min(1.0, c * factor + (1 - factor) * 0.9) for c in base_rgb)
+                    gradients.append(mcolors.rgb2hex(rgb))
+                
+                for pathway, color in zip(sorted(group_pathways), gradients):
+                    pathway_color_map[pathway] = color
+    
+    # Handle "Other" category
+    if "Other" in pathway_counts:
+        pathway_color_map["Other"] = '#CCCCCC'  # Gray for unclassified
+    
+    return gene_pathways, pathway_color_map, list(pathway_color_map.keys())
+
+def plot_gene_expression_subplots(gene_list, lcpm_data, time_data, 
+                                 figsize=(15, 10), color='#0077b6', 
+                                 ncols=3, save_path=None):
+    """
+    Plot expression trajectories for a list of genes in separate subplots.
+    """
+    
+    # Filter genes that are actually in the data
+    available_genes = [gene for gene in gene_list if gene in lcpm_data.index]
+    missing_genes = [gene for gene in gene_list if gene not in lcpm_data.index]
+    
+    if missing_genes:
+        print(f"Warning: The following genes were not found in the data: {missing_genes}")
+    
+    if not available_genes:
+        print("No genes found in the data!")
+        return None
+    
+    # Calculate subplot dimensions
+    n_genes = len(available_genes)
+    nrows = (n_genes + ncols - 1) // ncols  # Ceiling division
+    
+    # Create subplots
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
+    
+    # Handle case where we have only one row or column
+    if nrows == 1:
+        axes = axes.reshape(1, -1) if n_genes > 1 else [axes]
+    elif ncols == 1:
+        axes = axes.reshape(-1, 1)
+    else:
+        axes = axes.flatten() if n_genes > 1 else [axes]
+    
+    # Plot each gene
+    for i, gene in enumerate(available_genes):
+        if nrows == 1 and ncols == 1:
+            ax = axes
+        elif nrows == 1:
+            ax = axes[i]
+        else:
+            ax = axes[i] if n_genes > 1 else axes
+            
+        # Plot expression trajectory
+        ax.plot(time_data, lcpm_data.loc[gene], linewidth=2, color=color)
+        
+        # Formatting
+        ax.set_title(gene, fontsize=12, fontweight='bold')
+        ax.set_ylabel('Log CPM', fontsize=10)
+        ax.set_xlabel('Time', fontsize=10)
+        
+        # Remove top and right spines for cleaner look
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        # Add grid for better readability
+        ax.grid(True, alpha=0.3)
+    
+    # Hide empty subplots
+    if n_genes < len(axes):
+        for i in range(n_genes, len(axes)):
+            if nrows == 1:
+                axes[i].set_visible(False)
+            else:
+                axes[i].set_visible(False)
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Save if path provided
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight', dpi=300, format='pdf')
+        print(f"Figure saved to: {save_path}")
+    
+    plt.show()
+    return fig
+
+def plot_tf_gene_coregulation_heatmap(
+    df_ep1, df_ep2, df_ep3, df_ep4,
+    episode_labels=['Ep 1', 'Ep 2', 'Ep 3', 'Ep 4'],
+    min_tf_episodes=1,
+    min_gene_tfs=1,
+    figsize=None,
+    cmap_name="Blues",
+    cluster_genes=True,
+    cluster_tfs=True,
+    show_values=True,
+    value_fontsize=8,
+    show_plot=True,
+    pathway_labels=None  # Dictionary mapping genes to pathways
+):
+    """
+    Creates a heatmap showing TF-gene co-regulation patterns across episodes with pathway annotations.
+    """    
+    # Helper function to parse genes
+    def parse_genes_in_lf(genes_str):
+        try:
+            if pd.isna(genes_str) or genes_str == '' or genes_str == '()':
+                return set()
+            genes_tuple = ast.literal_eval(genes_str)
+            return set(genes_tuple) if isinstance(genes_tuple, tuple) else {genes_tuple} if isinstance(genes_tuple, str) else set()
+        except:
+            return set()
+    
+    # Collect TF-gene relationships across all episodes
+    tf_gene_episodes = {}  # (tf, gene) -> set of episodes
+    
+    dfs = [df_ep1, df_ep2, df_ep3, df_ep4]
+    for ep_idx, (df_ep, ep_label) in enumerate(zip(dfs, episode_labels)):
+        if df_ep is None or df_ep.empty:
+            continue
+            
+        df_clean = df_ep.dropna(subset=['TF', 'genes_in_lf'])
+        
+        for _, row in df_clean.iterrows():
+            tf_name = row['TF']
+            genes_set = parse_genes_in_lf(row.get('genes_in_lf', ''))
+            
+            for gene in genes_set:
+                key = (tf_name, gene)
+                if key not in tf_gene_episodes:
+                    tf_gene_episodes[key] = set()
+                tf_gene_episodes[key].add(ep_idx)
+    
+    if not tf_gene_episodes:
+        print("No TF-gene relationships found.")
+        return None, None, None, None
+    
+    # Filter TFs and genes based on minimum criteria
+    tf_episode_counts = {}
+    gene_tf_counts = {}
+    
+    for (tf, gene), episodes in tf_gene_episodes.items():
+        if tf not in tf_episode_counts:
+            tf_episode_counts[tf] = set()
+        tf_episode_counts[tf].update(episodes)
+        
+        if gene not in gene_tf_counts:
+            gene_tf_counts[gene] = set()
+        gene_tf_counts[gene].add(tf)
+    
+    # Filter TFs and genes
+    selected_tfs = [tf for tf, episodes in tf_episode_counts.items() 
+                   if len(episodes) >= min_tf_episodes]
+    selected_genes = [gene for gene, tfs in gene_tf_counts.items() 
+                     if len(tfs) >= min_gene_tfs]
+    
+    if not selected_tfs or not selected_genes:
+        print(f"No TFs or genes meet the filtering criteria")
+        return None, None, None, None
+    
+    # Create TF-gene matrix with episode counts
+    tf_gene_matrix = np.zeros((len(selected_tfs), len(selected_genes)))
+    
+    for i, tf in enumerate(selected_tfs):
+        for j, gene in enumerate(selected_genes):
+            key = (tf, gene)
+            if key in tf_gene_episodes:
+                tf_gene_matrix[i, j] = len(tf_gene_episodes[key])
+    
+    # Process pathway annotations
+    pathway_info = None
+    if pathway_labels:
+        gene_pathways, pathway_color_map, unique_pathways = create_pathway_color_scheme(
+            pathway_labels, selected_genes)
+        
+        pathway_info = {
+            'gene_pathways': gene_pathways,
+            'pathway_color_map': pathway_color_map,
+            'unique_pathways': unique_pathways
+        }
+    
+    # Clustering
+    if cluster_tfs and len(selected_tfs) > 1:
+        from sklearn.metrics.pairwise import cosine_distances
+        try:
+            tf_distances = cosine_distances(tf_gene_matrix)
+            tf_condensed = squareform(tf_distances)
+            tf_linkage = linkage(tf_condensed, method='ward')
+            tf_order = leaves_list(tf_linkage)
+            selected_tfs = [selected_tfs[i] for i in tf_order]
+            tf_gene_matrix = tf_gene_matrix[tf_order, :]
+        except Exception as e:
+            print(f"TF clustering failed: {e}")
+
+    # Gene clustering by pathway groups
+    if cluster_genes and len(selected_genes) > 1:
+        if pathway_info:
+            # Pathway-based clustering
+            print("Clustering genes by pathway groups...")
+            
+            # Create ordered gene list by pathway
+            ordered_genes = []
+            for pathway in pathway_info['unique_pathways']:
+                # Get genes in this pathway
+                genes_in_pathway = [gene for gene in selected_genes 
+                                if pathway_info['gene_pathways'][gene] == pathway]
+                
+                if len(genes_in_pathway) > 1:
+                    # Cluster genes within the same pathway
+                    try:
+                        gene_indices = [selected_genes.index(gene) for gene in genes_in_pathway]
+                        pathway_gene_matrix = tf_gene_matrix[:, gene_indices].T
+                        
+                        gene_distances = cosine_distances(pathway_gene_matrix)
+                        gene_condensed = squareform(gene_distances)
+                        gene_linkage = linkage(gene_condensed, method='ward')
+                        gene_order = leaves_list(gene_linkage)
+                        
+                        genes_in_pathway = [genes_in_pathway[i] for i in gene_order]
+                    except Exception:
+                        genes_in_pathway = sorted(genes_in_pathway)
+                
+                ordered_genes.extend(genes_in_pathway)
+            
+            # Reorder matrix columns
+            gene_reorder_indices = [selected_genes.index(gene) for gene in ordered_genes]
+            tf_gene_matrix = tf_gene_matrix[:, gene_reorder_indices]
+            selected_genes = ordered_genes
+            
+            print(f"Genes reordered by {len(pathway_info['unique_pathways'])} pathway groups")
+        
+        else:
+            # Original similarity-based clustering
+            try:
+                gene_tf_matrix = tf_gene_matrix.T  
+                gene_distances = cosine_distances(gene_tf_matrix)
+                gene_condensed = squareform(gene_distances)
+                gene_linkage = linkage(gene_condensed, method='ward')
+                gene_order = leaves_list(gene_linkage)
+                selected_genes = [selected_genes[i] for i in gene_order]
+                tf_gene_matrix = tf_gene_matrix[:, gene_order]
+            except Exception as e:
+                print(f"Gene clustering failed: {e}")
+
+    # Update pathway info after reordering
+    if pathway_info:
+        pathway_info['gene_pathways'] = {gene: pathway_info['gene_pathways'][gene] 
+                                    for gene in selected_genes}
+    
+    # Determine figure size
+    if figsize is None:
+        fig_width = len(selected_genes) * 0.4 + 3
+        fig_height = len(selected_tfs) * 0.3 + 2
+        if pathway_info:
+            fig_height += 0.3  # Reduced space for thinner pathway annotation
+        figsize = (max(8, min(fig_width, 20)), max(6, min(fig_height, 15)))
+    
+    # Create figure with subplots for pathway annotation
+    if pathway_info:
+        fig = plt.figure(figsize=figsize)
+        gs = gridspec.GridSpec(2, 1, height_ratios=[0.06, 1], hspace=0.02)  # Thinner pathway bar
+        ax_pathway = fig.add_subplot(gs[0])
+        ax_main = fig.add_subplot(gs[1])
+    else:
+        fig, ax_main = plt.subplots(figsize=figsize)
+    
+    # Plot pathway annotation bar with improved colors
+    if pathway_info:
+        pathway_colors_ordered = [pathway_info['pathway_color_map'][pathway_info['gene_pathways'][gene]] 
+                                for gene in selected_genes]
+        
+        # Convert hex colors to RGB for imshow
+        pathway_colors_rgb = [mcolors.hex2color(color) for color in pathway_colors_ordered]
+        pathway_bar = np.array(pathway_colors_rgb).reshape(1, -1, 3)
+        
+        ax_pathway.imshow(pathway_bar, aspect='auto')
+        ax_pathway.set_xlim(-0.5, len(selected_genes) - 0.5)
+        ax_pathway.set_xticks([])
+        ax_pathway.set_yticks([])
+        ax_pathway.set_ylabel("Pathway", fontsize=9, rotation=0, ha='right', va='center')
+    
+    # Plot main heatmap with proper grid
+    im = ax_main.imshow(tf_gene_matrix, cmap=cmap_name, aspect='auto', 
+                       vmin=0, vmax=len(episode_labels))
+    
+    # Add grid lines to create boxes
+    ax_main.set_xticks(np.arange(-0.5, len(selected_genes), 1), minor=True)
+    ax_main.set_yticks(np.arange(-0.5, len(selected_tfs), 1), minor=True)
+    ax_main.grid(which='minor', color='white', linestyle='-', linewidth=1)
+    
+    # Set ticks and labels
+    ax_main.set_xticks(range(len(selected_genes)))
+    ax_main.set_xticklabels(selected_genes, rotation=90, ha='center', fontsize=8)
+    ax_main.set_xlabel("Target Genes", fontsize=10)
+    
+    ax_main.set_yticks(range(len(selected_tfs)))
+    ax_main.set_yticklabels(selected_tfs, fontsize=8)
+    ax_main.set_ylabel("Transcription Factors", fontsize=10)
+    
+    # Add values to cells
+    if show_values:
+        for i in range(len(selected_tfs)):
+            for j in range(len(selected_genes)):
+                value = tf_gene_matrix[i, j]
+                if value > 0:
+                    text_color = 'white' if value > len(episode_labels)/2 else 'black'
+                    ax_main.text(j, i, f'{int(value)}', ha='center', va='center',
+                               color=text_color, fontsize=value_fontsize, weight='bold')
+    
+    # Horizontal Colorbar at bottom
+    cbar = plt.colorbar(im, ax=ax_main, orientation='horizontal', 
+                    fraction=0.05, pad=0.1, shrink=0.6, aspect=30)
+    cbar.set_label('Number of Episodes', fontsize=10)
+    cbar.set_ticks(range(len(episode_labels) + 1))
+    
+    # Add pathway legend in middle right
+    if pathway_info:
+        legend_elements = []
+        for pathway in pathway_info['unique_pathways']:
+            color = pathway_info['pathway_color_map'][pathway]
+            legend_elements.append(plt.Rectangle((0,0),1,1, facecolor=color, label=pathway))
+        
+        # Position legend in middle right
+        legend = ax_main.legend(handles=legend_elements, loc='center left', 
+                            bbox_to_anchor=(1.02, 0.5),  # Middle right
+                            fontsize=7, frameon=False, ncol=1)
+        
+        # Adjust legend to not overlap with horizontal colorbar
+        legend.set_bbox_to_anchor((1.02, 0.65))  # Move up slightly to avoid colorbar
+
+    # Title
+    title = f'TF-Gene Co-regulation Across Episodes\n({len(selected_tfs)} TFs, {len(selected_genes)} genes)'
+    if pathway_info:
+        title += f', {len(pathway_info["unique_pathways"])} pathways'
+    ax_main.set_title(title, fontsize=12, pad=20)
+    
+    # Set limits
+    ax_main.set_xlim(-0.5, len(selected_genes) - 0.5)
+    ax_main.set_ylim(-0.5, len(selected_tfs) - 0.5)
+    
+    plt.tight_layout()
+    
+    if show_plot:
+        plt.show()
+    
+    # Return summary dataframe
+    summary_data = []
+    for i, tf in enumerate(selected_tfs):
+        for j, gene in enumerate(selected_genes):
+            episodes_count = tf_gene_matrix[i, j]
+            if episodes_count > 0:
+                pathway = pathway_info['gene_pathways'][gene] if pathway_info else "Unknown"
+                summary_data.append({
+                    'TF': tf,
+                    'Gene': gene, 
+                    'Episodes_Count': int(episodes_count),
+                    'Pathway': pathway
+                })
+    
+    summary_df = pd.DataFrame(summary_data)
+    
+    # Print summary
+    print(f"\nPlot Summary:")
+    print(f"- {len(selected_tfs)} TFs included")
+    print(f"- {len(selected_genes)} target genes included")
+    if pathway_info:
+        print(f"- {len(pathway_info['unique_pathways'])} pathway categories")
+    print(f"- Total TF-gene relationships: {len(summary_data)}")
+    
+    return fig, summary_df, selected_genes, selected_tfs
