@@ -1,23 +1,16 @@
-import gc
-import math
-import multiprocessing as mp
-import os
-import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from functools import partial
-from typing import Any, Optional, Tuple, Union
-
-import dictys
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from dictys.net import stat
-from dictys.utils.numpy import ArrayLike, NDArray
-from joblib import Memory
-from scipy import stats
-from scipy.stats import hypergeom
-from tqdm import tqdm
+import os
+import joblib
+import pickle
+import math
+import ast
+from scipy.stats import median_abs_deviation, hypergeom, mannwhitneyu
+from scipy.cluster.hierarchy import linkage, dendrogram, leaves_list
+from scipy.spatial.distance import squareform
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import matplotlib.colors as mcolors
 
 import dictys
 from utils_custom import *
@@ -378,6 +371,8 @@ def plot_tf_episodic_enrichment_dotplot(
         # Create axes for horizontal colorbar below the p-value legend
         cbar_ax = fig.add_axes([0.85, 0.15, 0.3, 0.03])  # [left, bottom, width, height]
     else:
+
+        
         # Create axes for horizontal colorbar below the p-value legend
         cbar_ax = fig.add_axes([0.65, 0.4, 0.2, 0.02])  # [left, bottom, width, height]
     
