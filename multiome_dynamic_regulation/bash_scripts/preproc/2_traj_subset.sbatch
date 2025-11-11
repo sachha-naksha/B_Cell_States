@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name="subset"
-#SBATCH --output="windows_male.log"
+#SBATCH --job-name="subset_traj"
+#SBATCH --output="windows_rbpj_ntc.log"
 
 #SBATCH -p RM-shared
 #SBATCH -N 1 # by default for gpu-shared you can only request 1 node
@@ -8,7 +8,7 @@
 #SBATCH --ntasks-per-node 32 # how many cards do you want?
 
 # Set the working directory to where data and makefiles are located
-WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2"
+WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/outs/dictys/rbpj_ntc"
 # Change directory to the working directory
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
@@ -19,19 +19,19 @@ source activate dictys
 mkdir -p tmp_dynamic
 
 # Calculate parameters
-total_cells_in_dataset=28494
+total_cells_in_dataset=2088 # Rbpj-ntc
 #ncell=$(( (${total_cells_in_dataset} * 155 / 1000) / 100 * 100 ))
-ncell=1000
+ncell=500
 #noverlap=$(( (${ncell} * 875 / 1000) / 50 * 50 ))
-noverlap=800
-max_pseudotime_in_traj=0.0068
+noverlap=400
+max_pseudotime_in_traj=0.0156
 # dmax=$(awk -v max=$max_pseudotime_in_traj 'BEGIN {
 #     raw = 0.004 * max;
 #     scaled = raw * 1000000;
 #     rounded = int(scaled / 5) * 5;
 #     printf "%.6f", rounded / 1000000;
 # }')
-dmax=0.0005
+dmax=0.00006
 # get the subsets
 if ! [ -e tmp_dynamic/subsets.txt ] || ! [ -e tmp_dynamic/subset_locs.h5 ] || ! [ -e tmp_dynamic/subset_edges.tsv.gz ]; then python3 -m dictys dynamic subsets_rna data/traj_node.h5 data/traj_cell_rna.h5 data/coord_rna.tsv.gz tmp_dynamic/subsets.txt tmp_dynamic/subset_locs.h5 tmp_dynamic tmp_dynamic/subset_edges.tsv.gz $ncell $noverlap $dmax; fi
 
