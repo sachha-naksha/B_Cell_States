@@ -32,13 +32,22 @@ max_pseudotime_in_traj=0.0156
 #     printf "%.6f", rounded / 1000000;
 # }')
 dmax=0.005
-# get the subsets
-if ! [ -e tmp_dynamic/subsets.txt ] || ! [ -e tmp_dynamic/subset_locs.h5 ] || ! [ -e tmp_dynamic/subset_edges.tsv.gz ]; then python3 -m dictys dynamic subsets_rna data/traj_node.h5 data/traj_cell_rna.h5 data/coord_rna.tsv.gz tmp_dynamic/subsets.txt tmp_dynamic/subset_locs.h5 tmp_dynamic tmp_dynamic/subset_edges.tsv.gz $ncell $noverlap $dmax; fi
 
-# copy the names_rna.txt to names_atac0.txt for joint profiled multiomic datasets from all the subsets
-# Get number of subsets by counting directories that match the pattern Subset*
-#num_subsets=$(ls -d tmp_dynamic/Subset* | wc -l)
-# Copy files for each subset
-#for i in $(seq 1 $num_subsets); do
-#    cp tmp_dynamic/Subset${i}/names_rna.txt tmp_dynamic/Subset${i}/names_atac0.txt
-#done
+python -c "
+from dictys.dynamic import subsets_rna
+
+# get the subsets
+subsets_rna(
+    fi_traj='$WORK_DIR/data/traj_node.h5',
+    fi_traj_cell_rna='$WORK_DIR/data/traj_cell_rna.h5',
+    fi_coord_rna='$WORK_DIR/data/coord_rna.tsv.gz',
+    diro_subsets='$WORK_DIR/tmp_dynamic',
+    fo_subsets='$WORK_DIR/tmp_dynamic/subsets.txt',
+    fo_subset_locs='$WORK_DIR/tmp_dynamic/subset_locs.h5',
+    fo_subset_edges='$WORK_DIR/tmp_dynamic/subset_edges.tsv.gz',
+    ncell=$ncell,
+    noverlap=$noverlap,
+    dmax=$dmax)
+"
+
+echo "Trajectory subsets made for Rbpj-ntc"
