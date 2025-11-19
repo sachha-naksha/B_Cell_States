@@ -41,11 +41,10 @@ if [ ! -f "$INPUT_RNA" ]; then
     exit 1
 fi
 
-# Check if output file already exists
+# Note: If output file exists, it will be overwritten
 if [ -f "$OUTPUT_EXPR" ]; then
     echo "WARNING: Output file already exists: $OUTPUT_EXPR"
-    echo "Skipping processing for Subset${SUBSET_NUM}"
-    exit 0
+    echo "It will be overwritten"
 fi
 
 # Verify file is not empty
@@ -64,13 +63,11 @@ source activate dictys
 
 python -c "
 from dictys.preproc import selects_rna
-
 selects_rna(
     fi_reads='$WORK_DIR/data/expression.tsv.gz',
     fi_names='$INPUT_RNA',
     fo_reads='$OUTPUT_EXPR'
 )
 "
+
 echo "Processing completed for Subset${SUBSET_NUM}"
-
-
