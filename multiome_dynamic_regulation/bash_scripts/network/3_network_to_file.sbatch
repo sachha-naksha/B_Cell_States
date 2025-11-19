@@ -4,10 +4,10 @@
 #SBATCH -p RM
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=128 #for memory to contain all subsets and write to a single file
-#SBATCH -t 4:00:00  # Adjust time as needed
+#SBATCH -t 2:00:00  # Adjust time as needed
 
 # Set the working directory
-WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2"
+WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/outs/dictys/rbpj_ntc"
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
 # Ensure the output directory exists

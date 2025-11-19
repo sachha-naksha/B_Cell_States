@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name="normalization"
-#SBATCH --output="normalize_windows.log"  
+#SBATCH --output="normalize_rbpj.log"  
 #SBATCH -p RM-shared           
 #SBATCH -N 1            
 #SBATCH --ntasks-per-node=32 #for memory     
 #SBATCH -t 00:30:00 
-#SBATCH --array=1-193
+#SBATCH --array=0-23
 
 # Set working directory
-WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2"
+WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/outs/dictys/rbpj_ntc"
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
 # Load necessary modules and activate the environment
