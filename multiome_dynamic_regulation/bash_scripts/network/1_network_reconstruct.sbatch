@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name="auto_reconstruct_submit"
-#SBATCH --output="reconstruct_windows_auto.log"  # Single log file for the submission job
+#SBATCH --output="rbpj_reconstruct_windows_auto.log"  # Single log file for the submission job
 #SBATCH -p RM-shared           # Use a CPU-only partition for job submission script
 #SBATCH -N 1            # Request 1 node
 #SBATCH  --ntasks-per-node=1     # Single task for submission
@@ -8,7 +8,7 @@
 
 # Set working directory
 WORK_DIR="/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/outs/dictys/rbpj_ntc"
-SCRIPT_PATH="/ocean/projects/cis240075p/asachan/bio_informatics_analysis/B_Cells_human_analysis/analysis_repo/multiome_dynamic_regulation/py_scripts/dynamic_grn/network_reconstruct_batch.py"
+SCRIPT_PATH="/ocean/projects/cis240075p/asachan/bio_informatics_analysis/B_Cells_human_analysis/src/multiome_dynamic_regulation/py_scripts/dynamic_grn/network_reconstruct_batch.py"
 cd $WORK_DIR || { echo "Error: Could not change directory to $WORK_DIR"; exit 1; }
 
 # Load necessary modules and activate the environment (if required)
@@ -53,7 +53,7 @@ while [ $current_window -le $end_window ]; do
     echo "Submitting batch for windows $current_window to $upper_limit (Time: $hours:$minutes:00)"
     sbatch --partition=GPU-shared --time="${hours}:${minutes}:00" --output="reconstruct_windows_${current_window}_to_${upper_limit}.log" <<-EOF
 #!/bin/bash
-#SBATCH --job-name="reconstruct_batch_${current_window}_to_${upper_limit}"
+#SBATCH --job-name="rbpj_reconstruct_batch_${current_window}_to_${upper_limit}"
 #SBATCH --output=/dev/null
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks-per-node=5

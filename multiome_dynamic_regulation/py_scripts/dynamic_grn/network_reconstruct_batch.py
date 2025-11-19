@@ -14,7 +14,7 @@ os.chdir(WORK_DIR)
 
 def run_reconstruction(subset_num):
     input_expression = f"tmp_dynamic/Subset{subset_num}/expression0.tsv.gz"
-    input_binlinking = "data/mouse_base_grn.tsv.gz"
+    input_binlinking = f"tmp_dynamic/Subset{subset_num}/binlinking.tsv.gz"
     output_net_weight = f"tmp_dynamic/Subset{subset_num}/net_weight.tsv.gz"
     output_net_meanvar = f"tmp_dynamic/Subset{subset_num}/net_meanvar.tsv.gz"
     output_net_covfactor = f"tmp_dynamic/Subset{subset_num}/net_covfactor.tsv.gz"
