@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name="ee_prdm1_ko_gc"
-#SBATCH --output="ee_prdm1_ko_gc.log"  
+#SBATCH --job-name="ee_ikzf1_ko"
+#SBATCH --output="ee_ikzf1_ko.log"  
 #SBATCH -p RM-shared           
 #SBATCH -N 1            
-#SBATCH --ntasks-per-node=64 #for memory     
+#SBATCH --ntasks-per-node=64 #for memory 
 #SBATCH -t 00:30:00 
-#SBATCH --array=1-8
+#SBATCH --array=1-6
 
 # Set working directory where the python script is located
 WORK_DIR="/ocean/projects/cis240075p/asachan/bio_informatics_analysis/B_Cells_human_analysis/src/multiome_dynamic_regulation/py_scripts/analysis"
@@ -16,19 +16,16 @@ module load anaconda3/2022.10
 source activate dictys
 
 # I/O file names
-dictys_dynamic_object_path="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output/dynamic.h5"
-output_folder="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/dictys_outs/actb1_added_v2/output/intermediate_tmp_files/prdm1_ko/gc_98"
-latent_factor_folder="/ocean/projects/cis240075p/asachan/datasets/B_Cell/multiome_1st_donor_UPMC_aggr/other_files/latent_factors"
-lf_blimp1_file="${latent_factor_folder}/feature_list_Z5_PRDM1_KO.txt"
-lf_irf4_file="${latent_factor_folder}/feature_list_Z4_IRF4_KO.txt"
+dictys_dynamic_object_path="/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/outs/dictys/rbpj_ntc/output/dynamic.h5"
+output_folder="/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/outs/dictys/rbpj_ntc/output/ikzf1"
 
 # Calculate the window number based on the array task ID
 episode_idx=$((SLURM_ARRAY_TASK_ID))
-time_slice_start=$(( (episode_idx - 1) * 5 )) # 5 windows per episode
-time_slice_end=$(( episode_idx * 5 ))
-traj_start=1
-traj_end=3
-num_points=40 # 8 episodes (40/5)
+time_slice_start=$(( (episode_idx - 1) * 4 )) # N windows per episode
+time_slice_end=$(( episode_idx * 4 ))
+traj_start=0
+traj_end=1
+num_points=24
 dist=0.001
 sparsity=0.01
 percentile=98
@@ -53,14 +50,27 @@ from utils_custom import *
 from episodic_dynamics import *
 from pseudotime_curves import *
 
-lf_blimp1 = pd.read_csv(\"${lf_blimp1_file}\", sep='\t')['names'].tolist()
-lf_irf4 = pd.read_csv(\"${lf_irf4_file}\", sep='\t')['names'].tolist()
+# ETS1 KO
+# ets1_lf_sig1 = pd.read_csv(\"/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/Data/latent_factors/ets1_lfs/feature_list_Z7.txt\", sep='\t')['names'].tolist()
+# ets1_lf_sig2 = pd.read_csv(\"/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/Data/latent_factors/ets1_lfs/feature_list_Z28.txt\", sep='\t')['names'].tolist()
+# ets1_lf_int1 = pd.read_csv(\"/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/Data/latent_factors/ets1_lfs/feature_list_Z16.txt\", sep='\t')['names'].tolist()
+# ets1_lf_int2 = pd.read_csv(\"/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/Data/latent_factors/ets1_lfs/feature_list_Z26.txt\", sep='\t')['names'].tolist()
+
+# ets1_sig_lfs = ets1_lf_sig1 + ets1_lf_sig2
+# ets1_all_lfs = ets1_sig_lfs +ets1_lf_int1 + ets1_lf_int2
+
+# IKZF1 KO
+ikzf1_lf_sig = pd.read_csv("/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/Data/latent_factors/ikzf1_lfs/feature_list_Z7.txt", sep='\t')['names'].tolist()
+ikzf1_lf_int1 = pd.read_csv("/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/Data/latent_factors/ikzf1_lfs/feature_list_Z18.txt", sep='\t')['names'].tolist()
+ikzf1_lf_int2 = pd.read_csv("/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/Data/latent_factors/ikzf1_lfs/feature_list_Z29.txt", sep='\t')['names'].tolist()
+
+#create a set of all latent factors
+ikzf1_all_lfs = set(ikzf1_lf_sig + ikzf1_lf_int1 + ikzf1_lf_int2)
 
 run_episode(
     episode_idx=${episode_idx},
     dictys_dynamic_object_path=\"${dictys_dynamic_object_path}\",
     output_folder=\"${output_folder}\",
-    latent_factor_folder=\"${latent_factor_folder}\",
     trajectory_range=(${traj_start}, ${traj_end}),
     num_points=${num_points},
     time_slice_start=${time_slice_start},
@@ -68,7 +78,7 @@ run_episode(
     dist=${dist},
     sparsity=${sparsity},
     percentile=${percentile},
-    lf_genes=lf_blimp1
+    lf_genes=ikzf1_all_lfs
 )
 "
 

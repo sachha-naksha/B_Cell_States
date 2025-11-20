@@ -89,13 +89,12 @@ class EpisodeDynamics:
     workflow for episodic grn extraction, filtering, force calculation, and enrichment.
     """
 
-    def __init__(self, dictys_dynamic_object, output_folder, latent_factor_folder, mode="expression",
+    def __init__(self, dictys_dynamic_object, output_folder, mode="expression",
                  trajectory_range=(1, 3), num_points=40, dist=0.001, sparsity=0.01, n_processes=16):
         
         # Core parameters
         self.dictys_dynamic_object = dictys_dynamic_object
         self.output_folder = output_folder
-        self.latent_factor_folder = latent_factor_folder
         self.mode = mode
         self.trajectory_range = trajectory_range
         self.num_points = num_points
@@ -857,7 +856,6 @@ def run_episode(
     episode_idx,
     dictys_dynamic_object_path,
     output_folder,
-    latent_factor_folder,
     trajectory_range,
     num_points,
     time_slice_start,
@@ -872,16 +870,14 @@ def run_episode(
     epi = EpisodeDynamics(
         dictys_dynamic_object=dictys_dynamic_object,
         output_folder=output_folder,
-        latent_factor_folder=latent_factor_folder,
         mode="expression",
-        trajectory_range=trajectory_range,  # branch would give why cells are going down there
+        trajectory_range=trajectory_range,
         num_points=num_points,
         dist=dist,
         sparsity=sparsity
     )
     epi.compute_expression_curves()
     epi.set_lf_genes(lf_genes)
-    # time slice is the number of windows in the episode based on the sampled num_points
     epi.build_episode_grn(time_slice=slice(time_slice_start, time_slice_end))
     epi.filter_edges()
     epi.compute_tf_expression()
