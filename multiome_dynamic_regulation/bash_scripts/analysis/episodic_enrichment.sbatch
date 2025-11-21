@@ -3,7 +3,7 @@
 #SBATCH --output="ee_ikzf1_ko.log"  
 #SBATCH -p RM-shared           
 #SBATCH -N 1            
-#SBATCH --ntasks-per-node=64 #for memory 
+#SBATCH --ntasks-per-node=64 #for memory
 #SBATCH -t 00:30:00 
 #SBATCH --array=1-6
 
@@ -17,7 +17,7 @@ source activate dictys
 
 # I/O file names
 dictys_dynamic_object_path="/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/outs/dictys/rbpj_ntc/output/dynamic.h5"
-output_folder="/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/outs/dictys/rbpj_ntc/output/ikzf1"
+output_folder="/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/outs/dictys/rbpj_ntc/output/ikzf1/sig_lfs"
 
 # Calculate the window number based on the array task ID
 episode_idx=$((SLURM_ARRAY_TASK_ID))
@@ -56,13 +56,13 @@ from pseudotime_curves import *
 # ets1_lf_int1 = pd.read_csv(\"/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/Data/latent_factors/ets1_lfs/feature_list_Z16.txt\", sep='\t')['names'].tolist()
 # ets1_lf_int2 = pd.read_csv(\"/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/Data/latent_factors/ets1_lfs/feature_list_Z26.txt\", sep='\t')['names'].tolist()
 
-# ets1_sig_lfs = ets1_lf_sig1 + ets1_lf_sig2
-# ets1_all_lfs = ets1_sig_lfs +ets1_lf_int1 + ets1_lf_int2
+# #create a set of all latent factors
+# ets1_all_lfs = set(ets1_lf_sig1 + ets1_lf_sig2 + ets1_lf_int1 + ets1_lf_int2)
 
 # IKZF1 KO
-ikzf1_lf_sig = pd.read_csv("/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/Data/latent_factors/ikzf1_lfs/feature_list_Z7.txt", sep='\t')['names'].tolist()
-ikzf1_lf_int1 = pd.read_csv("/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/Data/latent_factors/ikzf1_lfs/feature_list_Z18.txt", sep='\t')['names'].tolist()
-ikzf1_lf_int2 = pd.read_csv("/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/Data/latent_factors/ikzf1_lfs/feature_list_Z29.txt", sep='\t')['names'].tolist()
+ikzf1_lf_sig = pd.read_csv(\"/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/Data/latent_factors/ikzf1_lfs/feature_list_Z7.txt\", sep='\t')['names'].tolist()
+ikzf1_lf_int1 = pd.read_csv(\"/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/Data/latent_factors/ikzf1_lfs/feature_list_Z18.txt\", sep='\t')['names'].tolist()
+ikzf1_lf_int2 = pd.read_csv(\"/ocean/projects/cis240075p/asachan/datasets/B_Cell/T_cell/Data/latent_factors/ikzf1_lfs/feature_list_Z29.txt\", sep='\t')['names'].tolist()
 
 #create a set of all latent factors
 ikzf1_all_lfs = set(ikzf1_lf_sig + ikzf1_lf_int1 + ikzf1_lf_int2)
@@ -78,7 +78,7 @@ run_episode(
     dist=${dist},
     sparsity=${sparsity},
     percentile=${percentile},
-    lf_genes=ikzf1_all_lfs
+    lf_genes=ikzf1_lf_sig
 )
 "
 
