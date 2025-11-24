@@ -330,3 +330,10 @@ class SmoothedCurves:
         result_df = pd.DataFrame(top_tfs_dict)
 
         return result_df
+
+def cell_counts_per_window(dictys_dynamic_object):
+    """
+    compute cell counts per window
+    """
+    cell_counts_per_window = dictys_dynamic_object.cell_counts_per_window()
+    return cell_counts_per_window

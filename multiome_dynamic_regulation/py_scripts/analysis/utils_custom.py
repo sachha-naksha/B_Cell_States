@@ -126,7 +126,7 @@ def get_state_labels_in_window(dictys_dynamic_object, cell_labels):
     for window_idx in range(cell_assignment_matrix.shape[0]):
         indices_of_cells_present_in_window = np.where(
             cell_assignment_matrix[window_idx] == 1
-        )[0]
+        )[0] #these indices start from 0
         state_labels_in_window[window_idx] = [
             cell_labels[idx] for idx in indices_of_cells_present_in_window
         ]
