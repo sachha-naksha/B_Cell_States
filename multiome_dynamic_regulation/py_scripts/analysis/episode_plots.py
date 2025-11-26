@@ -102,12 +102,24 @@ def plot_tf_episodic_enrichment_dotplot(
     dendrogram_ratio=0.2,
     figure_title=None,
     log_scale=False,
-    show_plot=True
+    show_plot=True,
+    tf_order=None
 ):
     """
     Plots a dotplot for TF episodic enrichment where dot color represents enrichment score 
     and dot size represents p-value significance (smaller p-value = larger dot).
-    TFs are sorted alphabetically by default, or by gene similarity if specified.
+    
+    TFs can be sorted in three ways (priority order):
+    1. Custom order (if tf_order is provided)
+    2. Gene similarity clustering (if sort_by_gene_similarity=True)
+    3. Alphabetical (default)
+    
+    Parameters:
+    -----------
+    tf_order : list of str, optional
+        Custom order for TF rows. If provided, overrides other sorting methods.
+        TFs not in the list will be appended alphabetically at the end.
+        TFs in the list but not in the data will be ignored.
     """    
     # 1. Input validation
     required_cols = ['TF', 'p_value', 'enrichment_score', 'genes_in_lf', 'genes_dwnstrm']
@@ -115,11 +127,11 @@ def plot_tf_episodic_enrichment_dotplot(
     for i, df in enumerate(dfs):
         if df is None or df.empty:
             print(f"Episode {i+1} dataframe is None or empty.")
-            return None, None
+            return None, None, None  # FIXED: Changed from return None, None
         for col in required_cols:
             if col not in df.columns:
                 print(f"Episode {i+1} dataframe missing required column: {col}")
-                return None, None
+                return None, None, None  # FIXED: Changed from return None, None
     
     # 2. Helper function to parse genes_in_lf column
     def parse_genes_in_lf(genes_str):
@@ -168,7 +180,7 @@ def plot_tf_episodic_enrichment_dotplot(
     
     if not plot_data_list:
         print("No valid data found across all episodes.")
-        return None, None
+        return None, None, None  # FIXED, None  # FIXED: Changed from return None, None
     
     plot_data_df = pd.DataFrame(plot_data_list)
     
@@ -183,7 +195,7 @@ def plot_tf_episodic_enrichment_dotplot(
     
     if not valid_tfs:
         print(f"No TFs meet the criteria: >= {min_targets_in_lf} LF genes AND >= {min_targets_dwnstrm} downstream genes")
-        return None, None
+        return None, None, None  # FIXED, None  # FIXED: Changed from return None, None
     
     # Filter plot data and gene dictionaries to only include valid TFs
     plot_data_df = plot_data_df[plot_data_df['TF'].isin(valid_tfs)]
@@ -201,7 +213,7 @@ def plot_tf_episodic_enrichment_dotplot(
         
         if not significant_tfs:
             print(f"No TFs meet the minimum significance threshold of {min_significance_threshold}")
-            return None, None
+            return None, None, None  # FIXED, None  # FIXED: Changed from return None, None
 
         # Filter the plot data to only include significant TFs
         plot_data_df = plot_data_df[plot_data_df['TF'].isin(significant_tfs)]
@@ -212,7 +224,25 @@ def plot_tf_episodic_enrichment_dotplot(
         print(f"Further filtered to {len(significant_tfs)} TFs that meet significance threshold < {min_significance_threshold}")
 
     # 6. Sort TFs based on specified method
-    if sort_by_gene_similarity:
+    # Priority: custom order > gene similarity > alphabetical
+    if tf_order is not None:
+        # Use custom order
+        available_tfs = set(tf_genes_dict.keys())
+        
+        # Filter custom order to only include TFs present in the data
+        all_tfs_sorted = [tf for tf in tf_order if tf in available_tfs]
+        
+        # Add any TFs not in custom order (alphabetically sorted)
+        remaining_tfs = sorted(available_tfs - set(all_tfs_sorted))
+        all_tfs_sorted.extend(remaining_tfs)
+        
+        linkage_matrix = None
+        original_tf_labels = None
+        
+        if remaining_tfs:
+            print(f"Note: {len(remaining_tfs)} TFs not in custom order were added alphabetically: {remaining_tfs}")
+            
+    elif sort_by_gene_similarity:
         if show_dendrogram:
             all_tfs_sorted, linkage_matrix, original_tf_labels = sort_tfs_by_gene_similarity(
                 tf_genes_dict, return_linkage=True)
@@ -251,11 +281,11 @@ def plot_tf_episodic_enrichment_dotplot(
         min_enrichment = plot_data_df['enrichment_score'].min()
         if min_enrichment <= 0:
             offset = abs(min_enrichment) + 1e-6
-            plot_data_df['enrichment_score_log'] = np.log10(plot_data_df['enrichment_score'] + offset)
-            value_legend_title = f"log10({value_legend_title} + {offset:.1e})"
+            plot_data_df['enrichment_score_log'] = np.log2(plot_data_df['enrichment_score'] + offset)
+            value_legend_title = f"log2({value_legend_title} + {offset:.1e})"
         else:
-            plot_data_df['enrichment_score_log'] = np.log10(plot_data_df['enrichment_score'])
-            value_legend_title = f"log10({value_legend_title})"
+            plot_data_df['enrichment_score_log'] = np.log2(plot_data_df['enrichment_score'])
+            value_legend_title = f"log2({value_legend_title})"
         
         # Use log-transformed values for coloring
         color_values = plot_data_df['enrichment_score_log']
@@ -287,7 +317,6 @@ def plot_tf_episodic_enrichment_dotplot(
         ax_main.set_position([main_left, 0.1, main_width, 0.8])
 
         # Plot dendrogram
-        from scipy.cluster.hierarchy import dendrogram
         dendro_plot = dendrogram(
             linkage_matrix, 
             ax=ax_dendro,
@@ -371,8 +400,6 @@ def plot_tf_episodic_enrichment_dotplot(
         # Create axes for horizontal colorbar below the p-value legend
         cbar_ax = fig.add_axes([0.85, 0.15, 0.3, 0.03])  # [left, bottom, width, height]
     else:
-
-        
         # Create axes for horizontal colorbar below the p-value legend
         cbar_ax = fig.add_axes([0.65, 0.4, 0.2, 0.02])  # [left, bottom, width, height]
     

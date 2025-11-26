@@ -1,7 +1,6 @@
 ####
 # 1. Loads smoothened networks and builds episodic GRNs.
-# 2. Enriches regulons in an episodic manner to specify temporal action of TFs responsible for cellular transitions.
-# 3. Gets cell composition of the episodes.
+# 2. Enriches regulons in an episodic manner to specify temporal action of TFs responsible for regulon expression dynamics.
 ####
 
 import gc
