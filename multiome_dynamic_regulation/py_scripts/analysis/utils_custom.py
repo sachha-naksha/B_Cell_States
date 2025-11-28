@@ -882,8 +882,7 @@ def plot_force_heatmap_with_clustering(
     cluster_method: str = "ward",
     dtop: float = 0,
     dright: float = 0.3,
-    row_scaling: dict = None,
-    pathway_labels: dict = None
+    row_scaling: dict = None,  # New parameter for scaling specific rows
 ) -> Tuple[pd.DataFrame, list, pd.Series, Optional[matplotlib.figure.Figure]]:
     """
     Prepares force value data for clustering heatmap and optionally plots it.
@@ -990,110 +989,28 @@ def plot_force_heatmap_with_clustering(
             )
             plt.title("Clustered Force Heatmap")
         else:
-            # Extract target genes for pathway annotation
-            target_genes = [target for tf, target in reg_pairs]
+            # Simple heatmap without clustering
+            fig, ax = plt.subplots(figsize=figsize)
+            im = ax.imshow(dnet, aspect='auto', interpolation='none', cmap=cmap,
+                          vmin=-vmax_val, vmax=vmax_val)
             
-            # Process pathway annotations if provided
-            pathway_info = None
-            if pathway_labels:
-                gene_pathways, pathway_color_map, unique_pathways = create_pathway_color_scheme(
-                    pathway_labels, target_genes)
-                
-                pathway_info = {
-                    'gene_pathways': gene_pathways,
-                    'pathway_color_map': pathway_color_map,
-                    'unique_pathways': unique_pathways
-                }
+            # Add colorbar
+            cbar = plt.colorbar(im, label="Force")
             
-            # Create figure with subplots for pathway annotation
-            if pathway_info:
-                fig = plt.figure(figsize=figsize)
-                # Adjust layout: thinner main plot + thicker pathway bar + space for legend
-                gs = gridspec.GridSpec(1, 2, width_ratios=[1, 0.1], wspace=0.1)  # Changed from [1, 0.03] to [1, 0.1]
-                ax_main = fig.add_subplot(gs[0])
-                ax_pathway = fig.add_subplot(gs[1])
-            else:
-                fig, ax_main = plt.subplots(figsize=figsize)
-
-            # Plot main heatmap
-            im = ax_main.imshow(dnet, aspect='auto', interpolation='none', cmap=cmap,
-                              vmin=-vmax_val, vmax=vmax_val)
-            
-            # Add horizontal colorbar at the bottom
-            plt.subplots_adjust(bottom=0.15)
-            
-            # Create a new axes for the horizontal colorbar positioned at the bottom
-            if pathway_info:
-                cbar_ax = fig.add_axes([0.15, 0.01, 0.6, 0.01])  # Adjusted for pathway bar
-            else:
-                cbar_ax = fig.add_axes([0.3, 0.01, 0.4, 0.01])
-            
-            cbar = plt.colorbar(im, cax=cbar_ax, orientation='horizontal', label="Force")
-            cbar.ax.tick_params(labelsize=8)
-            cbar.set_label("Force", fontsize=10)
-            
-            # Set regulation pair labels
-            ax_main.set_yticks(list(range(len(reg_labels))))
-            ax_main.set_yticklabels(reg_labels)
-            
-            # Set pseudotime labels
+            # Set pseudotime labels as x axis labels
+            ax.set_xlabel("Pseudotime")
             num_ticks = 10
             tick_positions = np.linspace(0, dnet.shape[1] - 1, num_ticks, dtype=int)
             tick_labels = dtime.iloc[tick_positions]
-            ax_main.set_xticks(tick_positions)
-            ax_main.set_xticklabels([f"{x:.4f}" for x in tick_labels], rotation=45, ha="right")
-            ax_main.set_xlabel("Pseudotime")
+            ax.set_xticks(tick_positions)
+            ax.set_xticklabels([f"{x:.4f}" for x in tick_labels], rotation=45, ha="right")
+            
+            # Set regulation pair labels
+            ax.set_yticks(list(range(len(reg_labels))))
+            ax.set_yticklabels(reg_labels)
             
             # Add grid lines
-            ax_main.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
-            
-                        # Plot pathway annotation bar if pathway info is available
-            if pathway_info:
-                # Create pathway colors for each regulation (based on target gene)
-                pathway_colors_ordered = []
-                for tf, target in reg_pairs:
-                    if target in pathway_info['gene_pathways']:
-                        pathway = pathway_info['gene_pathways'][target]
-                        color = pathway_info['pathway_color_map'][pathway]
-                    else:
-                        color = '#CCCCCC'  # Gray for unknown pathways
-                    pathway_colors_ordered.append(color)
-                
-                # Convert hex colors to RGB for imshow
-                import matplotlib.colors as mcolors
-                pathway_colors_rgb = [mcolors.hex2color(color) for color in pathway_colors_ordered]
-                pathway_bar = np.array(pathway_colors_rgb).reshape(-1, 1, 3)
-                
-                # Plot pathway annotation bar with proper alignment
-                ax_pathway.imshow(pathway_bar, aspect='auto', extent=[0, 1, len(reg_labels) - 0.5, -0.5])
-                
-                # Ensure proper alignment with main heatmap
-                ax_pathway.set_ylim(len(reg_labels) - 0.5, -0.5)
-                ax_pathway.set_xlim(0, 1)
-                ax_pathway.set_xticks([])
-                ax_pathway.set_yticks([])
-                
-                # Remove all spines (borders) from the pathway bar
-                for spine in ax_pathway.spines.values():
-                    spine.set_visible(False)
-                
-                # Ensure both axes have the same y-limits and orientation
-                main_ylim = ax_main.get_ylim()
-                ax_pathway.set_ylim(main_ylim)
-                
-                # Add pathway legend on the right side
-                legend_elements = []
-                for pathway in pathway_info['unique_pathways']:
-                    color = pathway_info['pathway_color_map'][pathway]
-                    legend_elements.append(plt.Rectangle((0,0),1,1, facecolor=color, label=pathway))
-                
-                # Position legend on the right side
-                legend = ax_main.legend(handles=legend_elements, loc='center left', 
-                                      bbox_to_anchor=(1.15, 0.5),  # Right side
-                                      fontsize=8, frameon=False, ncol=1)
-                
-                # Adjust legend position to not overlap with horizontal colorbar
-                legend.set_bbox_to_anchor((1.15, 0.6))  # Move up slightly
+            ax.grid(which="minor", color="w", linestyle="-", linewidth=0.5)
             
         plt.tight_layout()
     

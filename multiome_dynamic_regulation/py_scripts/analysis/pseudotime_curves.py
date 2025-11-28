@@ -83,6 +83,42 @@ class SmoothedCurves:
         
         return dy, dx
     
+    def get_beta_curves(self, specified_links: list):
+        """
+        get beta curves for specified links
+        """
+        
+        # getting the TF and target indices for querying the network
+        tf_list = list(set([link[0] for link in specified_links]))
+        TF_indices, _, missing_tfs = get_tf_indices(self.dictys_dynamic_object, tf_list)
+        target_list = list(set([link[1] for link in specified_links]))
+        target_indices = get_gene_indices(self.dictys_dynamic_object, target_list)
+
+        # sample evenly spaced points along the trajectory
+        pts, fsmooth = self.dictys_dynamic_object.linspace(self.trajectory_range[0], self.trajectory_range[1], self.num_points, self.dist)
+        # get the total effect (direct + indirect) network
+        stat1_net = fsmooth(stat.net(self.dictys_dynamic_object,varname='w_in')) #varname='w_in' total effect network
+        stat1_x=stat.pseudotime(self.dictys_dynamic_object,pts)
+        dnet = stat1_net.compute(pts)
+        dtime = pd.Series(stat1_x.compute(pts)[0])
+        subnetworks = dnet[np.ix_(TF_indices, target_indices, range(dnet.shape[2]))]
+        
+        # create multi-index tuples for all combinations of TF-target pairs
+        index_tuples = [(tf, target) for tf in TF_indices for target in target_indices]
+        multi_index = pd.MultiIndex.from_tuples(index_tuples, names=['TF', 'Target'])
+
+        # reshape the subnetworks array to 2D (pairs × time points)
+        n_tfs, n_targets, n_times = subnetworks.shape
+        reshaped_data = subnetworks.reshape(-1, n_times)
+
+        # create DataFrame with multi-index
+        beta_dcurve = pd.DataFrame(
+            reshaped_data,
+            index=multi_index,
+            columns=[f'time_{i}' for i in range(n_times)]
+        )
+        return beta_dcurve, dtime
+
     @staticmethod
     def calculate_auc(dx: NDArray[float], dy: NDArray[float]) -> NDArray[float]:
         """
