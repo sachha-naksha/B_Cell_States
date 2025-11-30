@@ -47,7 +47,7 @@ class SmoothedCurves:
         self.mode = mode
     
     def get_smoothed_curves(
-        self
+        self, mode=None
     ) -> Tuple[pd.DataFrame, pd.Series]:
         """
         compute expression (lcpm) and regulation (ltarget_count) curves over pseudotime for one branch.            
@@ -58,21 +58,24 @@ class SmoothedCurves:
         # sample equispaced points and instantiate smoothing function    
         pts, fsmooth = self.dictys_dynamic_object.linspace(self.trajectory_range[0], self.trajectory_range[1], self.num_points, self.dist)
         
-        if self.mode == "regulation":
+        # Use provided mode or fall back to instance mode
+        mode_to_use = mode if mode is not None else self.mode
+
+        if mode_to_use == "regulation":
             # Log number of targets
             stat1_net = fsmooth(stat.net(self.dictys_dynamic_object))
             stat1_netbin = stat.fbinarize(stat1_net, sparsity=self.sparsity)
             stat1_y = stat.flnneighbor(stat1_netbin)
-        elif self.mode == "weighted_regulation":
+        elif mode_to_use == "weighted_regulation":
             # Log weighted outdegree
             stat1_net = fsmooth(stat.net(self.dictys_dynamic_object))
             stat1_y = stat.flnneighbor(stat1_net, weighted_sparsity=self.sparsity)
-        elif self.mode == "tf_expression":
+        elif mode_to_use == "tf_expression":
             stat1_y = fsmooth(stat.lcpm_tf(self.dictys_dynamic_object, cut=0))
-        elif self.mode == "expression":
+        elif mode_to_use == "expression":
             stat1_y = fsmooth(stat.lcpm(self.dictys_dynamic_object, cut=0))
         else:
-            raise ValueError(f"Unknown mode {self.mode}.")
+            raise ValueError(f"Unknown mode {mode_to_use}.")
             
         # Pseudo time values (x axis)
         stat1_x = stat.pseudotime(self.dictys_dynamic_object, pts)
