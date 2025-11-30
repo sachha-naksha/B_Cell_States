@@ -83,9 +83,10 @@ class SmoothedCurves:
         
         return dy, dx
     
-    def get_beta_curves(self, specified_links: list):
+    def get_beta_curves(self, specified_links: list, varname: str = 'w_in'):
         """
-        get beta curves for specified links
+        get beta curves for specified links; 
+        varname: 'w_in' for normalized total effect network, 'w_n' for normalized direct effect network, 'w' for non-normalized direct effect network
         """
         
         # getting the TF and target indices for querying the network
@@ -97,14 +98,14 @@ class SmoothedCurves:
         # sample evenly spaced points along the trajectory
         pts, fsmooth = self.dictys_dynamic_object.linspace(self.trajectory_range[0], self.trajectory_range[1], self.num_points, self.dist)
         # get the total effect (direct + indirect) network
-        stat1_net = fsmooth(stat.net(self.dictys_dynamic_object,varname='w_in')) #varname='w_in' total effect network
+        stat1_net = fsmooth(stat.net(self.dictys_dynamic_object,varname=varname))
         stat1_x=stat.pseudotime(self.dictys_dynamic_object,pts)
         dnet = stat1_net.compute(pts)
         dtime = pd.Series(stat1_x.compute(pts)[0])
         subnetworks = dnet[np.ix_(TF_indices, target_indices, range(dnet.shape[2]))]
         
         # create multi-index tuples for all combinations of TF-target pairs
-        index_tuples = [(tf, target) for tf in TF_indices for target in target_indices]
+        index_tuples = [(tf, target) for tf in tf_list for target in target_list]
         multi_index = pd.MultiIndex.from_tuples(index_tuples, names=['TF', 'Target'])
 
         # reshape the subnetworks array to 2D (pairs × time points)
@@ -118,6 +119,59 @@ class SmoothedCurves:
             columns=[f'time_{i}' for i in range(n_times)]
         )
         return beta_dcurve, dtime
+    
+    @staticmethod
+    def calculate_force_curves(
+        beta_curves: pd.DataFrame, 
+        tf_expression: pd.Series
+    ) -> pd.DataFrame:
+        """
+        calculates regulatory force curves using log transformation.
+        
+        force is calculated as beta * tf_expression
+        
+        args:
+            beta_curves: DataFrame with regulatory coefficients (multi-indexed by tf and target)
+            tf_expression: Series with tf expression values
+            
+        returns:
+            dataframe with calculated force curves
+        """
+        # Count number of targets per tf from beta_curves multi-index
+        targets_per_tf = beta_curves.index.get_level_values(0).value_counts()
+        
+        # Create a DataFrame with repeated tf expression values for each target
+        expanded_tf_expr = pd.DataFrame(
+            np.repeat(
+                tf_expression.values, targets_per_tf.values, axis=0
+            ),
+            index=beta_curves.index,
+            columns=beta_curves.columns,
+        )
+        
+        # convert to numpy arrays for calculations
+        beta_array = beta_curves.to_numpy()
+        tf_array = expanded_tf_expr.to_numpy()
+        
+        # add small epsilon to avoid log(0)
+        epsilon = 1e-10
+        log_beta = np.log10(np.abs(beta_array) + epsilon)
+        log_tf = np.log10(tf_array + epsilon)
+        
+        # peserve signs from original beta values
+        signs = np.sign(beta_array)
+        
+        # calculate forces
+        force_array = signs * np.exp(log_beta + log_tf)
+        
+        # convert back to DataFrame with original index/columns
+        force_curves = pd.DataFrame(
+            force_array, 
+            index=beta_curves.index, 
+            columns=beta_curves.columns
+        )
+        
+        return force_curves
 
     @staticmethod
     def calculate_auc(dx: NDArray[float], dy: NDArray[float]) -> NDArray[float]:
@@ -203,59 +257,6 @@ class SmoothedCurves:
         if len(dx) < 2 or not (dx[1:] > dx[:-1]).all():
             raise ValueError("dx must be increasing and have at least 2 values.")
         return dy[:, -1] - dy[:, 0]
-
-    @staticmethod
-    def calculate_force_curves(
-        beta_curves: pd.DataFrame, 
-        tf_expression: pd.Series
-    ) -> pd.DataFrame:
-        """
-        calculates regulatory force curves using log transformation.
-        
-        force is calculated as beta * tf_expression
-        
-        args:
-            beta_curves: DataFrame with regulatory coefficients (multi-indexed by tf and target)
-            tf_expression: Series with tf expression values
-            
-        returns:
-            dataframe with calculated force curves
-        """
-        # Count number of targets per tf from beta_curves multi-index
-        targets_per_tf = beta_curves.index.get_level_values(0).value_counts()
-        
-        # Create a DataFrame with repeated tf expression values for each target
-        expanded_tf_expr = pd.DataFrame(
-            np.repeat(
-                tf_expression.values, targets_per_tf.values, axis=0
-            ),
-            index=beta_curves.index,
-            columns=beta_curves.columns,
-        )
-        
-        # convert to numpy arrays for calculations
-        beta_array = beta_curves.to_numpy()
-        tf_array = expanded_tf_expr.to_numpy()
-        
-        # add small epsilon to avoid log(0)
-        epsilon = 1e-10
-        log_beta = np.log10(np.abs(beta_array) + epsilon)
-        log_tf = np.log10(tf_array + epsilon)
-        
-        # peserve signs from original beta values
-        signs = np.sign(beta_array)
-        
-        # calculate forces
-        force_array = signs * np.exp(log_beta + log_tf)
-        
-        # convert back to DataFrame with original index/columns
-        force_curves = pd.DataFrame(
-            force_array, 
-            index=beta_curves.index, 
-            columns=beta_curves.columns
-        )
-        
-        return force_curves
 
     def curve_characteristics(
         self,
