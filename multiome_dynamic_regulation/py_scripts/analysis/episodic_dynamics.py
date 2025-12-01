@@ -75,13 +75,7 @@ class AlignTimeScales:
         dx = pd.Series(tmp_x[0])
         # return numpy array of pseudotime values
         return dx.to_numpy()
-    
-    def pseudotime_of_episode(self):
-        """
-        Pseudotime of an episode is the median pseudotime 
-        of the dist time-points present in the episode.
-        """
-        return None
+
 
 class EpisodeDynamics:
     """
