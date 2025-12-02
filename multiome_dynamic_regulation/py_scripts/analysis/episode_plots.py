@@ -67,7 +67,7 @@ def plot_tf_episodic_enrichment_dotplot(
     log_scale=False,
     show_plot=True,
     tf_order=None,
-    horizontal_layout=False 
+    horizontal_layout=False  # NEW PARAMETER
 ):
     """
     Plots a dotplot for TF episodic enrichment.
@@ -78,6 +78,7 @@ def plot_tf_episodic_enrichment_dotplot(
         If True, episodes are on y-axis (top to bottom) and TFs on x-axis (left to right).
         If False (default), TFs are on y-axis and episodes on x-axis.
     """    
+    # 1-5. [Same validation and filtering code as before]
     required_cols = ['TF', 'p_value', 'enrichment_score', 'genes_in_lf', 'genes_dwnstrm']
     
     for i, df in enumerate(dfs):
@@ -227,7 +228,10 @@ def plot_tf_episodic_enrichment_dotplot(
         # TFs on x-axis, Episodes on y-axis
         tf_x_coords = {tf: i for i, tf in enumerate(all_tfs_sorted)}
         episode_y_coords = {label: i for i, label in enumerate(episode_labels)}
+        print(f"DEBUG horizontal_layout: episode_labels order: {episode_labels}")
+        print(f"DEBUG horizontal_layout: episode_y_coords: {episode_y_coords}")
     else:
+        # Original: Episodes on x-axis, TFs on y-axis
         episode_x_coords = {label: i for i, label in enumerate(episode_labels)}
         tf_y_coords = {tf: i for i, tf in enumerate(all_tfs_sorted)}
     
@@ -293,8 +297,13 @@ def plot_tf_episodic_enrichment_dotplot(
     else:
         fig, ax_main = plt.subplots(figsize=figsize)
     
-    # 10. Create scatter plot
+    # 10. Create scatter plot - MODIFIED FOR HORIZONTAL LAYOUT
     if horizontal_layout:
+        # Debug: Check what TFs are in the data
+        unique_tfs_in_data = plot_data_df['TF'].unique()
+        print(f"DEBUG: Unique TFs in plot_data_df: {len(unique_tfs_in_data)}")
+        print(f"DEBUG: TFs in data: {sorted(unique_tfs_in_data)}")
+        
         scatter = ax_main.scatter(
             x=plot_data_df['TF'].map(tf_x_coords),
             y=plot_data_df['episode'].map(episode_y_coords),
@@ -317,14 +326,19 @@ def plot_tf_episodic_enrichment_dotplot(
             alpha=0.8
         )
     
-    # 11. Axis formatting
+    # 11. Axis formatting - MODIFIED FOR HORIZONTAL LAYOUT
     if horizontal_layout:
         # X-axis: TFs (left to right)
-        ax_main.set_xticks(list(tf_x_coords.values()))
-        ax_main.set_xticklabels(all_tfs_sorted, rotation=90, ha="center")
+        # Force exact tick positions
+        from matplotlib.ticker import FixedLocator
+        ax_main.xaxis.set_major_locator(FixedLocator(list(range(len(all_tfs_sorted)))))
+        ax_main.set_xticklabels(all_tfs_sorted, rotation=90, ha="center", fontsize=9)
+        ax_main.tick_params(axis='x', which='major', labelsize=9)
         x_pad = 0.5
         ax_main.set_xlim(-x_pad, len(all_tfs_sorted) - 1 + x_pad)
         ax_main.set_xlabel("TFs", fontsize=12, fontweight='bold')
+        
+        print(f"DEBUG: Plotting {len(all_tfs_sorted)} TFs on x-axis: {all_tfs_sorted}")
         
         # Y-axis: Episodes (top to bottom)
         ax_main.set_yticks(list(episode_y_coords.values()))
@@ -393,6 +407,11 @@ def plot_tf_episodic_enrichment_dotplot(
     # 14. Final formatting
     ax_main.grid(True, linestyle='--', alpha=0.3, axis='both')
     ax_main.tick_params(axis='both', which='major', pad=5)
+    
+    # Always invert y-axis so first item is at top
+    # - Vertical layout: First TF at top, progressing downward
+    # - Horizontal layout: First episode at top, progressing downward
+    ax_main.invert_yaxis()
     
     if figure_title is not None:
         fig.suptitle(figure_title, fontsize=14, fontweight='bold', y=0.95)
