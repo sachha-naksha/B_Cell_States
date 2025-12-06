@@ -1,15 +1,17 @@
 import gc
 import math
 import multiprocessing as mp
+from multiprocessing import Pool, cpu_count
 import os
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
-from typing import Optional, Tuple, Union
+from typing import List, Dict, Tuple, Optional, Union
 
 import dictys
 import matplotlib
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 import numpy as np
 import pandas as pd
 from dictys.net import stat
@@ -18,12 +20,13 @@ from numpy.typing import NDArray
 from joblib import Memory
 from scipy import stats
 from scipy.stats import hypergeom
+from scipy.ndimage import gaussian_filter1d
 from tqdm import tqdm
 
 from utils_custom import *
 
 
-class SmoothedCurves:
+class SmoothedCurvesGRN:
     """
     provides methods to compute expression and regulation curves,
     and calculate regulatory forces.
@@ -370,3 +373,282 @@ class SmoothedCurves:
         result_df = pd.DataFrame(top_tfs_dict)
 
         return result_df
+
+class SmoothedCurvesChromatin:
+    """
+    A class to extract, process, and visualize Transcription Factor (TF) binding dynamics
+    across genomic windows and pseudotime trajectories.
+    """
+
+    def __init__(self, tfs: List[str], base_path: str):
+        """
+        Initialize the chromatin accessibility data analyzer.
+
+        Parameters:
+        -----------
+        tfs : list
+            List of Transcription Factors to query.
+        base_path : str
+            Base path to the binding.tsv.gz files (e.g., 'path/to/tmp_dynamic').
+        """
+        self.tfs = tfs
+        self.base_path = base_path
+        
+        # Data containers
+        self.raw_scores: Dict[str, List[float]] = {}
+        self.raw_counts: Dict[str, List[float]] = {}
+        self.window_pseudotimes: Optional[np.ndarray] = None
+        
+        # Trajectory specific data
+        self.pb_indices: Optional[List[int]] = None
+        self.gc_indices: Optional[List[int]] = None
+        self.pb_pseudotime: Optional[np.ndarray] = None
+        self.gc_pseudotime: Optional[np.ndarray] = None
+        
+        # Processed series
+        self.series_pb: Dict[str, np.ndarray] = {}
+        self.series_gc: Dict[str, np.ndarray] = {}
+
+    @staticmethod
+    def _process_single_window(i: int, tfs: List[str], base_path: str) -> Tuple[int, Dict, Dict]:
+        """
+        Static worker method for multiprocessing. 
+        Must be static to be pickleable by multiprocessing.Pool.
+        """
+        try:
+            # Read the binding file
+            file_path = f'{base_path}/Subset{i}/binding.tsv.gz'
+            df = pd.read_csv(file_path, sep='\t', compression='gzip')
+            
+            # Efficient string parsing
+            if 'loc' in df.columns:
+                df[['chr', 'start', 'end']] = df['loc'].str.split(':', expand=True)
+            
+            window_scores = {}
+            window_counts = {}
+            
+            # Group once to avoid repeated filtering of TFs
+            grouped = df.groupby('TF')
+            
+            for tf in tfs:
+                if tf in grouped.groups:
+                    tf_df = grouped.get_group(tf)
+                    # Mean score across chromosomes
+                    window_scores[tf] = tf_df.groupby('chr').agg({'score': 'mean'}).mean().values[0]
+                    # Count OCRs across chromosomes
+                    window_counts[tf] = tf_df.groupby('chr').agg({'score': 'count'}).mean().values[0]
+                else:
+                    window_scores[tf] = float('nan')
+                    window_counts[tf] = 0
+            
+            return (i, window_scores, window_counts)
+        
+        except Exception as e:
+            # Silent fail for individual windows to keep process alive, but return safe defaults
+            return (i, {tf: float('nan') for tf in tfs}, {tf: 0 for tf in tfs})
+
+    @staticmethod
+    def _to_float(v):
+        if hasattr(v, "values"): # Handle Series/Array
+            arr = v.values
+            if len(arr) == 0: return np.nan
+            return arr[0]
+        return float(v)
+
+    @staticmethod
+    def _smooth(series, sigma):
+        return gaussian_filter1d(series, sigma=sigma)
+
+    # ------------------------------------------------------------------
+    # Data Extraction Methods
+    # ------------------------------------------------------------------
+
+    def extract_data(self, n_windows: int = 194, n_processes: int = None):
+        """
+        Multiprocess the extraction of TF binding data across all windows.
+        Populates self.raw_scores and self.raw_counts.
+        """
+        # Initialize result dictionaries
+        self.raw_scores = {tf: [None] * n_windows for tf in self.tfs}
+        self.raw_counts = {tf: [None] * n_windows for tf in self.tfs}
+        
+        if n_processes is None:
+            n_processes = max(1, cpu_count() - 1)
+        
+        print(f"Processing {n_windows} windows using {n_processes} processes...")
+        
+        # Prepare arguments for the static worker
+        process_func = partial(
+            SmoothedCurvesChromatin._process_single_window, 
+            tfs=self.tfs, 
+            base_path=self.base_path
+        )
+        
+        with Pool(processes=n_processes) as pool:
+            results = list(tqdm(
+                pool.imap(process_func, range(1, n_windows + 1)),
+                total=n_windows,
+                desc="Extracting Binding Data"
+            ))
+        
+        # Collect results
+        for window_idx, w_scores, w_counts in results:
+            # Adjust 1-based index to 0-based list index
+            idx = window_idx - 1
+            if 0 <= idx < n_windows:
+                for tf in self.tfs:
+                    self.raw_scores[tf][idx] = w_scores.get(tf, np.nan)
+                    self.raw_counts[tf][idx] = w_counts.get(tf, 0)
+        
+        print("Extraction complete.")
+
+    # ------------------------------------------------------------------
+    # Trajectory & Processing Methods
+    # ------------------------------------------------------------------
+
+    def set_trajectory_info(self, 
+                            pb_indices: List[int], 
+                            gc_indices: List[int], 
+                            window_pseudotimes: Union[List, np.ndarray]):
+        """
+        Register trajectory indices and pseudotime values.
+        
+        Parameters:
+        -----------
+        pb_indices : List[int]
+            0-based indices of windows belonging to the PB trajectory.
+        gc_indices : List[int]
+            0-based indices of windows belonging to the GC trajectory.
+        window_pseudotimes : array-like
+            Pseudotime value for every window (index corresponds to window ID).
+        """
+        self.pb_indices = pb_indices
+        self.gc_indices = gc_indices
+        self.window_pseudotimes = np.array(window_pseudotimes)
+        
+        # Map indices to pseudotimes immediately
+        self.pb_pseudotime = self.window_pseudotimes[self.pb_indices]
+        self.gc_pseudotime = self.window_pseudotimes[self.gc_indices]
+
+    def process_dynamics(self, metric: str = 'score', smooth_sigma: float = 2.0):
+        """
+        Process raw data into ordered, smoothed trajectories for PB and GC.
+        
+        Parameters:
+        -----------
+        metric : str, 'score' or 'count'
+            Which data source to process.
+        smooth_sigma : float
+            Sigma for Gaussian smoothing.
+        """
+        if self.pb_indices is None or self.gc_indices is None:
+            raise ValueError("Trajectories not set. Call set_trajectory_info() first.")
+
+        source_data = self.raw_scores if metric == 'score' else self.raw_counts
+        
+        self.series_pb = {}
+        self.series_gc = {}
+
+        for tf in self.tfs:
+            # Get raw values (ensure they are floats)
+            vals = [self._to_float(v) for v in source_data.get(tf, [])]
+            vals_arr = np.array(vals)
+
+            # Order based on trajectory indices
+            ordered_pb = vals_arr[self.pb_indices]
+            ordered_gc = vals_arr[self.gc_indices]
+
+            # Smooth
+            self.series_pb[tf] = self._smooth(ordered_pb, sigma=smooth_sigma)
+            self.series_gc[tf] = self._smooth(ordered_gc, sigma=smooth_sigma)
+
+    # ------------------------------------------------------------------
+    # Visualization Methods
+    # ------------------------------------------------------------------
+
+    def plot(self, 
+             categories: Dict[str, Dict[str, str]], 
+             y_label: str = "Binding Score",
+             title: str = None,
+             truncate_pb: bool = True) -> go.Figure:
+        """
+        Generate Plotly figure for the processed dynamics.
+
+        Parameters:
+        -----------
+        categories : dict
+            Structure: {"CategoryName": { "TF_Name": "ColorHex", ... }, ...}
+            Example: {"Static": {"TF1": "red"}, "Episodic": {"TF2": "blue"}}
+        y_label : str
+            Label for Y-axis.
+        truncate_pb : bool
+            If True, cuts the PB line to match the max pseudotime of GC.
+        """
+        if not self.series_pb:
+            raise ValueError("No processed data found. Call process_dynamics() first.")
+
+        # Determine truncation mask
+        mask_pb = np.ones(len(self.pb_pseudotime), dtype=bool)
+        max_gc_time = np.nanmax(self.gc_pseudotime)
+        
+        if truncate_pb:
+            mask_pb = self.pb_pseudotime <= max_gc_time
+
+        fig = go.Figure()
+
+        # Iterate through categories (e.g., Static, Episodic)
+        for cat_name, tf_color_map in categories.items():
+            first_in_cat = True
+            
+            for tf, color in tf_color_map.items():
+                if tf not in self.series_pb:
+                    print(f"Warning: {tf} not found in processed data.")
+                    continue
+
+                # Add GC Trace (Dashed)
+                fig.add_trace(go.Scatter(
+                    x=self.gc_pseudotime,
+                    y=self.series_gc[tf],
+                    mode='lines',
+                    name=tf,
+                    line=dict(dash='dash', color=color, width=2.5),
+                    legendgroup=tf,
+                    legendgrouptitle_text=cat_name if first_in_cat else None,
+                    showlegend=True
+                ))
+
+                # Add PB Trace (Solid)
+                fig.add_trace(go.Scatter(
+                    x=self.pb_pseudotime[mask_pb],
+                    y=self.series_pb[tf][mask_pb],
+                    mode='lines',
+                    name=tf,
+                    line=dict(dash='solid', color=color, width=2.5),
+                    legendgroup=tf,
+                    showlegend=False
+                ))
+                
+                first_in_cat = False
+
+        # Layout styling
+
+        fig.update_layout(
+            title=dict(text=title, x=0.5),
+            xaxis=dict(
+                title='Pseudotime',
+                showgrid=True,
+                range=[0, max_gc_time if truncate_pb else None]
+            ),
+            yaxis=dict(title=y_label),
+            legend=dict(
+                orientation='v', x=1.02, y=0.5,
+                tracegroupgap=25,
+                title_text="<b>TF Categories</b><br>(Solid=PB, Dashed=GC)"
+            ),
+            margin=dict(t=100, r=250),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            font=dict(family="Arial, sans-serif")
+        )
+
+        return fig
