@@ -4,4 +4,4 @@ Gene regulatory control of B cells bifurcating into GC and PB states. Multiome m
 https://docs.google.com/spreadsheets/d/164Z5sSsJUbWPfNiy1W_uJzHnrPdWg07Bn8b8sIEaNqo/edit?usp=sharing
 ## Workflow
 
-![Workflow](dictys_workflow.drawio.png)
+![Workflow](Fig1.pdf)
